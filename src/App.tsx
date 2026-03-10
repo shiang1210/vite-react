@@ -30,7 +30,7 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState('');
 
   const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
-  const LIFF_ID = 'YOUR_LIFF_ID_HERE';
+  const LIFF_ID = '2009406684-H9fk9ysT';
 
   const mockDataFallback: ItemData[] = [
     { id: 'm1', type: 'file', title: '離線備援資料', subtitle: '系統連線異常', content: '目前無法取得最新資料，請稍後重試或檢查系統日誌。', date: '今日', time: '剛剛', url: '#', icon: '⚠️', color: 'bg-red-100 text-red-800' }
