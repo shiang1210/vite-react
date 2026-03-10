@@ -1,23 +1,50 @@
 import { useState, useEffect } from 'react';
 
 /**
- * 智能資訊牆前端主程式 v9.1
+ * 智能資訊牆前端主程式 v9.2 (TypeScript 穩定版)
  * 修復項目：
- * 1. 強化 useEffect 依賴項安全性
- * 2. 修正網頁版多欄位瀑布流排列問題
- * 3. 整合縮圖顯示與繁體中文化介面
+ * 1. 定義 ItemData 與 Profile 介面解決 never[] 賦值問題
+ * 2. 修正 window.liff 型別定義與存取權限
+ * 3. 解決 index signature 與 typeMap 索引報錯
+ * 4. 補全函式參數與狀態型別聲明
  */
 
+// 定義資料介面以符合 TypeScript 規範
+interface ItemData {
+  id: string;
+  type: string;
+  title: string;
+  subtitle: string;
+  content: string;
+  date: string;
+  time: string;
+  url: string;
+  icon: string;
+  color: string;
+}
+
+interface LiffProfile {
+  pictureUrl?: string;
+  displayName: string;
+}
+
+// 擴充 Window 介面以包含 liff 屬性
+declare global {
+  interface Window {
+    liff: any;
+  }
+}
+
 export default function App() {
-  const [items, setItems] = useState([]);
-  const [filter, setFilter] = useState('全部');
-  const [profile, setProfile] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [items, setItems] = useState<ItemData[]>([]);
+  const [filter, setFilter] = useState<string>('全部');
+  const [profile, setProfile] = useState<LiffProfile | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
   const LIFF_ID = '2009406684-H9fk9ysT';
 
-  const mockDataFallback = [
+  const mockDataFallback: ItemData[] = [
     { 
       id: 'm1', 
       type: 'file', 
@@ -32,8 +59,8 @@ export default function App() {
     }
   ];
 
-  // 輔助函式：處理 Google Drive 縮圖轉換
-  const getThumbnail = (url) => {
+  // 輔助函式：處理 Google Drive 縮圖轉換，補齊參數型別
+  const getThumbnail = (url: string): string | null => {
     if (!url || !url.includes('drive.google.com')) return null;
     const match = url.match(/\/d\/(.+?)\//) || url.match(/id=(.+?)(&|$)/);
     return match ? `https://drive.google.com/thumbnail?id=${match[1]}&sz=w600` : null;
@@ -47,7 +74,7 @@ export default function App() {
           await window.liff.init({ liffId: LIFF_ID });
           if (window.liff.isLoggedIn()) {
             const p = await window.liff.getProfile();
-            setProfile(p);
+            setProfile(p as LiffProfile);
           }
         } catch (err) {
           console.error("LIFF 初始化失敗", err);
@@ -61,7 +88,7 @@ export default function App() {
         const res = await fetch(GAS_API_URL, { redirect: 'follow' });
         const data = await res.json();
         if (Array.isArray(data)) {
-          setItems(data);
+          setItems(data as ItemData[]);
         } else {
           setItems([]);
         }
@@ -75,15 +102,15 @@ export default function App() {
 
     initLiff();
     fetchData();
-  }, []); // 僅在載入時執行一次
+  }, []);
 
-  // 篩選邏輯與類別對照
+  // 篩選邏輯與類別對照，補齊索引型別定義
   const filteredItems = items.filter(item => {
-    const typeMap = { '全部': 'all', '郵件': 'email', '檔案': 'file', '連結': 'link' };
+    const typeMap: Record<string, string> = { '全部': 'all', '郵件': 'email', '檔案': 'file', '連結': 'link' };
     return filter === '全部' ? true : item.type === typeMap[filter];
   });
 
-  const handleCardClick = (url) => {
+  const handleCardClick = (url: string) => {
     if (url && url !== '#') {
       if (window.liff && window.liff.isInClient()) {
         window.liff.openWindow({ url: url, external: false });
@@ -95,14 +122,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20">
-      {/* 頂部導覽列 */}
       <header className="bg-white/80 backdrop-blur-xl sticky top-0 z-50 border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-2">
             <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center text-white text-xl shadow-lg shadow-indigo-100">📋</div>
             <div>
               <h1 className="text-xl font-black tracking-tighter">智能資訊牆</h1>
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest hidden sm:block">Stable Version 9.1</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest hidden sm:block">Stable Version 9.2</p>
             </div>
           </div>
           {profile && (
@@ -113,7 +139,6 @@ export default function App() {
           )}
         </div>
         
-        {/* 類別篩選器 */}
         <div className="max-w-7xl mx-auto px-6 pb-4 flex gap-2 overflow-x-auto no-scrollbar">
           {['全部', '郵件', '檔案', '連結'].map(t => (
             <button 
@@ -129,7 +154,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* 主內容展示區 */}
       <main className="max-w-7xl mx-auto p-6">
         {isLoading ? (
           <div className="py-40 text-center flex flex-col items-center gap-4">
@@ -151,7 +175,6 @@ export default function App() {
                   onClick={() => handleCardClick(item.url)}
                   className="bg-white rounded-3xl border border-slate-100 shadow-sm hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 overflow-hidden relative cursor-pointer group"
                 >
-                  {/* 照片縮圖顯示 */}
                   {item.type === 'file' && thumb && (
                     <div className="w-full h-36 bg-slate-100 overflow-hidden">
                       <img src={thumb} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt="預覽" />
