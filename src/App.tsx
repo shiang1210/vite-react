@@ -1,25 +1,10 @@
 import { useState, useEffect } from 'react';
 
-// 宣告全域 window.liff 型別
-declare global {
-  interface Window {
-    liff: any;
-  }
-}
+declare global { interface Window { liff: any; } }
 
-// 定義資料型別避免 never[] 錯誤
 interface ItemData {
-  id: string;
-  type: string;
-  title: string;
-  subtitle: string;
-  content: string;
-  date: string;
-  time: string;
-  url: string;
-  icon: string;
-  color: string;
-  subcategory?: string;
+  id: string; type: string; title: string; subtitle: string; content: string;
+  date: string; time: string; url: string; icon: string; color: string; subcategory?: string;
 }
 
 export default function App() {
@@ -27,108 +12,40 @@ export default function App() {
   const [filter, setFilter] = useState('all');
   const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [toastMessage, setToastMessage] = useState('');
 
-  const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
+  const GAS_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
   const LIFF_ID = '2009406684-H9fk9ysT';
 
-  const mockDataFallback: ItemData[] = [
-    { id: 'm1', type: 'file', title: '離線備援資料', subtitle: '系統連線異常', content: '目前無法取得最新資料，請稍後重試或檢查系統日誌。', date: '今日', time: '剛剛', url: '#', icon: '⚠️', color: 'bg-red-100 text-red-800' }
-  ];
-
   useEffect(() => {
-    if (window.liff) {
-        window.liff.init({ liffId: LIFF_ID })
-            .then(() => {
-                if (window.liff.isLoggedIn()) {
-                    window.liff.getProfile().then((p: any) => setProfile(p));
-                }
-            })
-            .catch((err: any) => console.error("LIFF 初始化失敗", err));
-    }
+    const init = async () => {
+      try {
+        await window.liff.init({ liffId: LIFF_ID });
+        if (window.liff.isLoggedIn()) setProfile(await window.liff.getProfile());
+      } catch (e) { console.error(e); }
 
-    fetch(GAS_API_URL, { redirect: 'follow' })
-      .then(res => res.json())
-      .then((data: any) => {
-        if (!data.error && data.length > 0) setItems(data);
-        else setItems([]);
-        setIsLoading(false);
-      })
-      .catch((err: any) => {
-        console.error("讀取資料失敗", err);
-        setItems(mockDataFallback);
-        setIsLoading(false);
-      });
+      try {
+        const res = await fetch(GAS_URL, { redirect: 'follow' });
+        const data = await res.json();
+        setItems(Array.isArray(data) ? data : []);
+      } catch (e) { console.error(e); }
+      setIsLoading(false);
+    };
+    init();
   }, []);
 
-  const handleBackup = () => {
-    setToastMessage('備份執行中...');
-    fetch(`${GAS_API_URL}?action=backup`, { redirect: 'follow' })
-      .then(res => res.json())
-      .then((data: any) => {
-        setToastMessage(data.success ? '系統備份成功' : '系統備份失敗');
-        setTimeout(() => setToastMessage(''), 3000);
-      })
-      .catch(() => {
-        setToastMessage('連線異常，備份失敗');
-        setTimeout(() => setToastMessage(''), 3000);
-      });
-  };
-
-  const filteredItems = items.filter(item => filter === 'all' ? true : item.type === filter);
-
-  const handleCardClick = (url: string) => {
-    if (url && url !== '#') {
-      if (window.liff && window.liff.isInClient()) {
-         window.liff.openWindow({ url: url, external: false });
-      } else {
-         window.open(url, '_blank');
-      }
-    }
-  };
-
-  const getTypeLabel = (type: string) => {
-    const types: Record<string, string> = { 'email': '信件', 'file': '檔案', 'form': '表單', 'link': '連結' };
-    return types[type] || '其他';
-  };
+  const filtered = items.filter(i => filter === 'all' ? true : i.type === filter);
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-800 font-sans relative">
-      {toastMessage && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">
-          {toastMessage}
+    <div className="min-h-screen bg-slate-50 font-sans pb-10">
+      <header className="bg-white/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-200 p-4">
+        <div className="max-w-md mx-auto flex justify-between items-center">
+          <h1 className="text-xl font-black text-slate-800 tracking-tighter">智能資訊牆</h1>
+          {profile && <img src={profile.pictureUrl} className="w-10 h-10 rounded-2xl shadow-sm" alt="" />}
         </div>
-      )}
-
-      <header className="bg-white shadow-sm sticky top-0 z-10">
-        <div className="max-w-md mx-auto px-4 py-3 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-gray-800">小幫手資訊牆</h1>
-          <div className="flex items-center space-x-3">
-            <button 
-              onClick={handleBackup}
-              className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-md text-xs font-bold hover:bg-indigo-100 transition-colors"
-            >
-              ☁️ 系統備份
-            </button>
-            {profile && (
-              <img 
-                src={profile.pictureUrl} 
-                alt="Profile" 
-                className="w-8 h-8 rounded-full border border-gray-200"
-                onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/150'; }}
-              />
-            )}
-          </div>
-        </div>
-        
-        <div className="max-w-md mx-auto px-4 pb-2 flex space-x-2 overflow-x-auto hide-scrollbar">
-          {['all', 'email', 'file', 'form', 'link'].map(t => (
-            <button 
-              key={t}
-              onClick={() => setFilter(t)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${filter === t ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-            >
-              {t === 'all' ? '全部' : t === 'email' ? '📧 郵件' : t === 'file' ? '📄 檔案' : t === 'form' ? '📝 表單' : '🔗 連結'}
+        <div className="max-w-md mx-auto mt-4 flex gap-2 overflow-x-auto no-scrollbar py-1">
+          {['all', 'email', 'file', 'link'].map(t => (
+            <button key={t} onClick={() => setFilter(t)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${filter === t ? 'bg-slate-800 text-white shadow-lg' : 'bg-white text-slate-400 border border-slate-100'}`}>
+              {t === 'all' ? '全部' : t.toUpperCase()}
             </button>
           ))}
         </div>
@@ -136,42 +53,22 @@ export default function App() {
 
       <main className="max-w-md mx-auto p-4 space-y-4">
         {isLoading ? (
-          <div className="text-center py-10 text-gray-500">資料讀取中...</div>
-        ) : filteredItems.length === 0 ? (
-          <div className="text-center py-10 text-gray-500">目前沒有相關資料</div>
-        ) : (
-          filteredItems.map(item => (
-            <div 
-              key={item.id} 
-              onClick={() => handleCardClick(item.url)}
-              className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 active:scale-[0.98] transition-transform cursor-pointer flex flex-col"
-            >
-              <div className="flex justify-between items-start mb-2">
-                <div className="flex space-x-2">
-                  <div className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-bold ${item.color}`}>
-                    <span>{item.icon}</span>
-                    <span>{getTypeLabel(item.type)}</span>
-                  </div>
-                  {item.subcategory && (
-                    <div className="flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-gray-100 text-gray-600">
-                      {item.subcategory}
-                    </div>
-                  )}
-                </div>
-                <div className="text-xs text-gray-400 font-medium">
-                  {item.date && item.date.split ? item.date.split('T')[0] : item.date} {item.time}
-                </div>
-              </div>
-              
-              <h2 className="text-base font-bold text-gray-800 leading-snug mb-1">{item.title}</h2>
-              <h3 className="text-sm font-medium text-gray-600 mb-3">{item.subtitle}</h3>
-              
-              <div className="bg-gray-50 rounded-xl p-3 text-sm text-gray-600 whitespace-pre-line border border-gray-100 mb-3">
-                {item.content}
-              </div>
+          <div className="py-20 text-center text-slate-400 font-bold animate-pulse">載入中...</div>
+        ) : filtered.map(item => (
+          <div key={item.id} onClick={() => item.url !== '#' && window.open(item.url, '_blank')} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm active:scale-95 transition-all">
+            <div className="flex justify-between items-start mb-4">
+              <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${item.color}`}>
+                {item.icon} {item.type}
+              </span>
+              <span className="text-[10px] font-bold text-slate-300">{item.date}</span>
             </div>
-          ))
-        )}
+            <h2 className="text-lg font-black text-slate-800 mb-1">{item.title}</h2>
+            <p className="text-xs font-bold text-slate-400 mb-4">{item.subtitle}</p>
+            <div className="bg-slate-50 p-4 rounded-2xl text-sm text-slate-600 leading-relaxed font-medium">
+              {item.content}
+            </div>
+          </div>
+        ))}
       </main>
     </div>
   );
