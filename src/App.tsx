@@ -1,16 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+
+// 宣告全域 window.liff 型別
+declare global {
+  interface Window {
+    liff: any;
+  }
+}
+
+// 定義資料型別避免 never[] 錯誤
+interface ItemData {
+  id: string;
+  type: string;
+  title: string;
+  subtitle: string;
+  content: string;
+  date: string;
+  time: string;
+  url: string;
+  icon: string;
+  color: string;
+  subcategory?: string;
+}
 
 export default function App() {
-  const [items, setItems] = useState([]);
+  const [items, setItems] = useState<ItemData[]>([]);
   const [filter, setFilter] = useState('all');
-  const [profile, setProfile] = useState(null);
+  const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState('');
 
   const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
   const LIFF_ID = 'YOUR_LIFF_ID_HERE';
 
-  const mockDataFallback = [
+  const mockDataFallback: ItemData[] = [
     { id: 'm1', type: 'file', title: '離線備援資料', subtitle: '系統連線異常', content: '目前無法取得最新資料，請稍後重試或檢查系統日誌。', date: '今日', time: '剛剛', url: '#', icon: '⚠️', color: 'bg-red-100 text-red-800' }
   ];
 
@@ -19,20 +41,20 @@ export default function App() {
         window.liff.init({ liffId: LIFF_ID })
             .then(() => {
                 if (window.liff.isLoggedIn()) {
-                    window.liff.getProfile().then(p => setProfile(p));
+                    window.liff.getProfile().then((p: any) => setProfile(p));
                 }
             })
-            .catch(err => console.error("LIFF 初始化失敗", err));
+            .catch((err: any) => console.error("LIFF 初始化失敗", err));
     }
 
     fetch(GAS_API_URL, { redirect: 'follow' })
       .then(res => res.json())
-      .then(data => {
+      .then((data: any) => {
         if (!data.error && data.length > 0) setItems(data);
         else setItems([]);
         setIsLoading(false);
       })
-      .catch(err => {
+      .catch((err: any) => {
         console.error("讀取資料失敗", err);
         setItems(mockDataFallback);
         setIsLoading(false);
@@ -43,7 +65,7 @@ export default function App() {
     setToastMessage('備份執行中...');
     fetch(`${GAS_API_URL}?action=backup`, { redirect: 'follow' })
       .then(res => res.json())
-      .then(data => {
+      .then((data: any) => {
         setToastMessage(data.success ? '系統備份成功' : '系統備份失敗');
         setTimeout(() => setToastMessage(''), 3000);
       })
@@ -55,7 +77,7 @@ export default function App() {
 
   const filteredItems = items.filter(item => filter === 'all' ? true : item.type === filter);
 
-  const handleCardClick = (url) => {
+  const handleCardClick = (url: string) => {
     if (url && url !== '#') {
       if (window.liff && window.liff.isInClient()) {
          window.liff.openWindow({ url: url, external: false });
@@ -65,8 +87,8 @@ export default function App() {
     }
   };
 
-  const getTypeLabel = (type) => {
-    const types = { 'email': '信件', 'file': '檔案', 'form': '表單', 'link': '連結' };
+  const getTypeLabel = (type: string) => {
+    const types: Record<string, string> = { 'email': '信件', 'file': '檔案', 'form': '表單', 'link': '連結' };
     return types[type] || '其他';
   };
 
@@ -93,7 +115,7 @@ export default function App() {
                 src={profile.pictureUrl} 
                 alt="Profile" 
                 className="w-8 h-8 rounded-full border border-gray-200"
-                onError={(e) => { e.target.src = 'https://via.placeholder.com/150'; }}
+                onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/150'; }}
               />
             )}
           </div>
