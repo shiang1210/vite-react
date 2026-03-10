@@ -1,25 +1,10 @@
 import { useState, useEffect } from 'react';
 
-// 宣告全域 window.liff 型別定義
-declare global {
-  interface Window {
-    liff: any;
-  }
-}
+declare global { interface Window { liff: any; } }
 
-// 定義資料列型別
 interface ItemData {
-  id: string;
-  type: string;
-  title: string;
-  subtitle: string;
-  content: string;
-  date: string;
-  time: string;
-  url: string;
-  icon: string;
-  color: string;
-  subcategory?: string;
+  id: string; type: string; title: string; subtitle: string; content: string;
+  date: string; time: string; url: string; icon: string; color: string; subcategory?: string;
 }
 
 export default function App() {
@@ -28,141 +13,113 @@ export default function App() {
   const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 硬編碼設定：請確保與後端及 LINE Developer 設定一致
   const GAS_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
   const LIFF_ID = '2009406684-H9fk9ysT';
 
   useEffect(() => {
-    const initSystem = async () => {
-      // 1. 初始化 LIFF
+    const init = async () => {
       try {
         if (window.liff) {
           await window.liff.init({ liffId: LIFF_ID });
-          if (window.liff.isLoggedIn()) {
-            const userProfile = await window.liff.getProfile();
-            setProfile(userProfile);
-          } else {
-            // 非 LINE 環境或未登入時可選擇自動登入
-            // window.liff.login(); 
-          }
+          if (window.liff.isLoggedIn()) setProfile(await window.liff.getProfile());
         }
-      } catch (e) {
-        console.error("LIFF 初始化失敗", e);
-      }
+      } catch (e) { console.error(e); }
 
-      // 2. 抓取 GAS 資料
       try {
-        const response = await fetch(GAS_URL, { redirect: 'follow' });
-        const data = await response.json();
-        if (Array.isArray(data)) {
-          setItems(data);
-        }
-      } catch (e) {
-        console.error("資料讀取失敗", e);
-      } finally {
-        setIsLoading(false);
-      }
+        const res = await fetch(GAS_URL, { redirect: 'follow' });
+        const data = await res.json();
+        setItems(Array.isArray(data) ? data : []);
+      } catch (e) { console.error(e); }
+      setIsLoading(false);
     };
-
-    initSystem();
+    init();
   }, []);
 
-  const filteredItems = items.filter(item => filter === 'all' ? true : item.type === filter);
+  const filtered = items.filter(i => filter === 'all' ? true : i.type === filter);
 
-  const handleCardAction = (url: string) => {
+  const handleOpen = (url: string) => {
     if (!url || url === '#') return;
-    
-    if (window.liff && window.liff.isInClient()) {
-      window.liff.openWindow({ url: url, external: false });
-    } else {
-      window.open(url, '_blank');
-    }
+    if (window.liff?.isInClient()) window.liff.openWindow({ url, external: false });
+    else window.open(url, '_blank');
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans pb-12 selection:bg-indigo-100">
-      {/* 頂部導覽列 */}
-      <header className="bg-white/90 backdrop-blur-md sticky top-0 z-50 border-b border-slate-200">
-        <div className="max-w-md mx-auto px-5 py-4 flex justify-between items-center">
-          <div>
-            <h1 className="text-xl font-black text-slate-800 tracking-tighter">智能資訊牆</h1>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Version 8.0 Stable</p>
+    <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans pb-20">
+      {/* 導覽列：手機置頂，電腦加寬 */}
+      <header className="bg-white/70 backdrop-blur-xl sticky top-0 z-50 border-b border-slate-200/60">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white text-xl shadow-lg">📊</div>
+            <div>
+              <h1 className="text-xl font-black tracking-tighter">智能資訊牆</h1>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden sm:block">Enterprise Management Console</p>
+            </div>
           </div>
-          {profile && (
-            <img 
-              src={profile.pictureUrl} 
-              alt="User" 
-              className="w-10 h-10 rounded-2xl border-2 border-white shadow-sm"
-            />
-          )}
+
+          <div className="flex items-center gap-4">
+            {/* 分類篩選：在電腦版會更寬鬆 */}
+            <nav className="hidden md:flex gap-2 mr-4 border-r border-slate-200 pr-4">
+              {['all', 'email', 'file', 'link'].map(t => (
+                <button key={t} onClick={() => setFilter(t)} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${filter === t ? 'bg-slate-900 text-white' : 'text-slate-400 hover:bg-slate-100'}`}>
+                  {t.toUpperCase()}
+                </button>
+              ))}
+            </nav>
+            {profile && (
+              <div className="flex items-center gap-3 bg-slate-100 p-1 pr-4 rounded-full border border-slate-200">
+                <img src={profile.pictureUrl} className="w-8 h-8 rounded-full border border-white shadow-sm" alt="" />
+                <span className="text-xs font-bold text-slate-600 hidden sm:block">{profile.displayName}</span>
+              </div>
+            )}
+          </div>
         </div>
         
-        {/* 分類篩選按鈕 */}
-        <div className="max-w-md mx-auto px-5 pb-4 flex gap-2 overflow-x-auto no-scrollbar">
-          {['all', 'email', 'file', 'link'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setFilter(t)}
-              className={`px-5 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition-all ${
-                filter === t 
-                ? 'bg-slate-800 text-white shadow-lg ring-2 ring-slate-800 ring-offset-2' 
-                : 'bg-white text-slate-500 border border-slate-100 hover:bg-slate-50'
-              }`}
-            >
+        {/* 手機版專用分類列 */}
+        <div className="md:hidden px-6 pb-4 flex gap-2 overflow-x-auto no-scrollbar">
+          {['all', 'email', 'file', 'link'].map(t => (
+            <button key={t} onClick={() => setFilter(t)} className={`px-5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${filter === t ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-400'}`}>
               {t === 'all' ? '全部' : t.toUpperCase()}
             </button>
           ))}
         </div>
       </header>
 
-      {/* 主內容區塊 */}
-      <main className="max-w-md mx-auto p-5 space-y-5">
+      {/* 主內容：電腦版自動變為 3 欄 */}
+      <main className="max-w-7xl mx-auto p-6">
         {isLoading ? (
-          <div className="flex flex-col items-center justify-center py-24 space-y-4">
-            <div className="w-8 h-8 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin"></div>
-            <p className="text-xs font-bold text-slate-400">同步雲端資料中...</p>
-          </div>
-        ) : filteredItems.length === 0 ? (
-          <div className="text-center py-24">
-            <div className="text-4xl mb-4">📭</div>
-            <p className="text-sm font-bold text-slate-300">目前沒有相關紀錄</p>
+          <div className="py-40 text-center space-y-4">
+            <div className="w-12 h-12 border-4 border-slate-200 border-t-slate-900 rounded-full animate-spin mx-auto"></div>
+            <p className="font-black text-slate-300">系統同步中...</p>
           </div>
         ) : (
-          filteredItems.map((item) => (
-            <div
-              key={item.id}
-              onClick={() => handleCardAction(item.url)}
-              className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden active:scale-[0.97] transition-all cursor-pointer group"
-            >
-              <div className="p-6">
-                <div className="flex justify-between items-start mb-4">
-                  <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${item.color || 'bg-slate-100 text-slate-600'}`}>
-                    {item.icon} {item.type}
-                  </span>
-                  <span className="text-[10px] font-bold text-slate-300">
-                    {item.date} {item.time}
-                  </span>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filtered.map(item => (
+              <div key={item.id} onClick={() => handleOpen(item.url)} className="group bg-white rounded-[2.5rem] p-6 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer">
+                <div className="flex justify-between items-start mb-6">
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tighter ${item.color || 'bg-slate-100 text-slate-500'}`}>
+                    <span>{item.icon}</span>
+                    <span>{item.type}</span>
+                  </div>
+                  <div className="text-[10px] font-bold text-slate-300 bg-slate-50 px-2 py-1 rounded-lg">
+                    {item.date?.split('T')[0]}
+                  </div>
                 </div>
                 
-                <h2 className="text-lg font-black text-slate-800 leading-tight mb-1 group-hover:text-indigo-600 transition-colors">
-                  {item.title}
-                </h2>
-                <h3 className="text-xs font-bold text-slate-400 mb-4">{item.subtitle}</h3>
+                <h2 className="text-lg font-black text-slate-800 leading-tight mb-2 group-hover:text-slate-600">{item.title}</h2>
+                <h3 className="text-xs font-bold text-slate-400 mb-5">{item.subtitle}</h3>
                 
-                <div className="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600 leading-relaxed border border-slate-50 font-medium">
+                <div className="bg-slate-50 rounded-2xl p-5 text-sm text-slate-600 leading-relaxed font-medium border border-slate-100/50">
                   {item.content}
                 </div>
+                
+                <div className="mt-5 flex justify-end">
+                  <span className="text-[10px] font-black text-slate-300 group-hover:text-slate-900 transition-colors uppercase italic">Click to open ↗</span>
+                </div>
               </div>
-            </div>
-          ))
+            ))}
+          </div>
         )}
       </main>
-
-      <footer className="max-w-md mx-auto text-center py-6">
-        <p className="text-[10px] font-bold text-slate-300 tracking-widest uppercase">
-          End of Information Wall
-        </p>
-      </footer>
     </div>
   );
 }
