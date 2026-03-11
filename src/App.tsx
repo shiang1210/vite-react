@@ -14,18 +14,20 @@ export default function App() {
   const [filter, setFilter] = useState<string>('全部');
   const [profile, setProfile] = useState<LiffProfile | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [keyword, setKeyword] = useState<string>('');
   
   const [confirmDelete, setConfirmDelete] = useState<{id: string, url: string} | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
-  // 請替換為新的 GAS URL
   const GAS_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
   const LIFF_ID = '2009406684-H9fk9ysT';
 
-  const fetchData = async () => {
+  const fetchData = async (searchKw = '') => {
+    setIsLoading(true);
     try {
-      const res = await fetch(GAS_URL, { redirect: 'follow' });
+      const url = searchKw ? `${GAS_URL}?keyword=${encodeURIComponent(searchKw)}` : GAS_URL;
+      const res = await fetch(url, { redirect: 'follow' });
       const data = await res.json();
       if (Array.isArray(data)) setItems(data);
     } catch (e) { console.error(e); }
@@ -85,6 +87,15 @@ export default function App() {
     }
   };
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    fetchData(keyword);
+  };
+
+  const handleExport = () => {
+    window.open(`${GAS_URL}?action=export`, '_blank');
+  };
+
   const getThumbnail = (url: string) => {
     if (!url.includes('drive.google.com')) return null;
     const match = url.match(/\/d\/(.+?)\//) || url.match(/id=(.+?)(&|$)/);
@@ -114,21 +125,39 @@ export default function App() {
         <div className="max-w-[1920px] mx-auto px-4 py-3 flex justify-between items-center">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">📋</div>
-            <h1 className="text-lg font-black tracking-tighter">智能資訊牆 V11</h1>
+            <h1 className="text-lg font-black tracking-tighter">智能資訊牆 V11.2</h1>
           </div>
-          {profile && (
-            <div className="flex items-center gap-2 bg-white p-1 pr-3 rounded-xl border border-slate-200">
-              <img src={profile.pictureUrl} className="w-6 h-6 rounded-lg object-cover" alt="" />
-              <span className="text-[10px] font-black hidden xs:block">{profile.displayName}</span>
-            </div>
-          )}
-        </div>
-        <div className="max-w-[1920px] mx-auto px-4 pb-3 flex gap-1.5 overflow-x-auto no-scrollbar">
-          {['全部', '待辦', '行程', '好文', '檔案'].map(t => (
-            <button key={t} onClick={() => setFilter(t)} className={`px-4 py-1.5 rounded-xl text-[11px] font-black whitespace-nowrap transition-all ${filter === t ? 'bg-slate-900 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-200/60'}`}>
-              {t}
+          <div className="flex items-center gap-3">
+            <button onClick={handleExport} className="px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-xs font-black hover:bg-emerald-100 transition-colors">
+              匯出 CSV
             </button>
-          ))}
+            {profile && (
+              <div className="flex items-center gap-2 bg-white p-1 pr-3 rounded-xl border border-slate-200">
+                <img src={profile.pictureUrl} className="w-6 h-6 rounded-lg object-cover" alt="" />
+                <span className="text-[10px] font-black hidden xs:block">{profile.displayName}</span>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        <div className="max-w-[1920px] mx-auto px-4 pb-3 flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+          <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+            {['全部', '待辦', '行程', '好文', '檔案'].map(t => (
+              <button key={t} onClick={() => setFilter(t)} className={`px-4 py-1.5 rounded-xl text-[11px] font-black whitespace-nowrap transition-all ${filter === t ? 'bg-slate-900 text-white shadow-md' : 'bg-white text-slate-400 border border-slate-200/60'}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+          <form onSubmit={handleSearch} className="flex gap-2">
+            <input 
+              type="text" 
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="搜尋關鍵字..." 
+              className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-indigo-500 w-full sm:w-48"
+            />
+            <button type="submit" className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-sm font-bold">搜尋</button>
+          </form>
         </div>
       </header>
 
