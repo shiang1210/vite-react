@@ -32,7 +32,417 @@
   <div id="root" class="min-h-screen w-full flex flex-col items-center"></div>
 
   <script type="text/plain" id="appSource">
-    /* 系統將讀取此區塊內容傳送至 GAS 進行備份，請手動更新此處存放完整程式碼 */
+    /* const PROPS = PropertiesService.getScriptProperties();
+
+function initializeSystem() {
+  const tempDoc = DocumentApp.create('Auth_Temp');
+  DriveApp.getFileById(tempDoc.getId()).setTrashed(true);
+  
+  const sheetId = PROPS.getProperty('SHEET_ID');
+  if (!sheetId) return "錯誤：請先在指令碼屬性設定 SHEET_ID";
+  
+  const ss = SpreadsheetApp.openById(sheetId);
+  const requiredSheets = ['資料', '設定', '99_系統日誌', '備份'];
+  
+  requiredSheets.forEach(name => {
+    if (!ss.getSheetByName(name)) {
+      const sheet = ss.insertSheet(name);
+      if (name === '資料') {
+        sheet.appendRow(['ID', 'Type', 'SubCategory', 'Title', 'Subtitle', 'Content', 'Date', 'Time', 'URL', 'Icon', 'Color']);
+        sheet.setFrozenRows(1);
+      } else if (name === '設定') {
+        sheet.appendRow(['LLM_ENGINE', 'Gemini']);
+        sheet.appendRow(['GEMINI_API_KEY', '請填寫金鑰']);
+        sheet.appendRow(['GROQ_API_KEY', '請填寫金鑰']);
+        sheet.appendRow(['LINE_ACCESS_TOKEN', '請填寫Token']);
+        sheet.appendRow(['DRIVE_FOLDER_ID', '請填寫資料夾ID']);
+        sheet.appendRow(['SYSTEM_PROMPT', '請綜合分析以下完整內容。若是待辦事項，請回傳 type 為 "todo"，title 為任務名稱，content 條列待辦。若是行程時間、計畫申請或含有具體日期的活動，type 為 "event"，title 為行程名稱，content 為詳細說明與時間。若是文章、連結摘要或一般檔案，type 為 "article"，並請務必根據內容生成一個對應的分類標籤放入 subcategory 欄位(例如：科技、設計、管理等)，title 為主旨，content 為綜合摘要。務必只回傳純 JSON 格式，包含 type, subcategory, title, content 四個欄位。內容如下：']);
+        sheet.setFrozenRows(1);
+      } else if (name === '備份') {
+        sheet.appendRow(['時間', '前端原始碼']);
+        sheet.setFrozenRows(1);
+      }
+    }
+  });
+  return "初始化完成";
+}
+
+function logSystem(level, msg, detail = "") {
+  try {
+    const ss = SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
+    const sheet = ss.getSheetByName('99_系統日誌') || ss.insertSheet('99_系統日誌');
+    sheet.appendRow([new Date(), level, msg, detail]);
+  } catch (e) {}
+}
+
+function analyzeWithLLM(text, settings) {
+  let engine = "Gemini", geminiKey = "", groqKey = "", sysPrompt = "";
+  settings.forEach(row => {
+    if (row[0] === 'LLM_ENGINE') engine = row[1];
+    if (row[0] === 'GEMINI_API_KEY') geminiKey = row[1];
+    if (row[0] === 'GROQ_API_KEY') groqKey = row[1];
+    if (row[0] === 'SYSTEM_PROMPT') sysPrompt = row[1];
+  });
+
+  if (!sysPrompt) sysPrompt = '請綜合分析以下完整內容。若是待辦事項，請回傳 type 為 "todo"，title 為任務名稱，content 條列待辦。若是行程時間、計畫申請或含有具體日期的活動，type 為 "event"，title 為行程名稱，content 為詳細說明與時間。若是文章、連結摘要或一般檔案，type 為 "article"，並請務必根據內容生成一個對應的分類標籤放入 subcategory 欄位(例如：科技、設計、管理等)，title 為主旨，content 為綜合摘要。務必只回傳純 JSON 格式，包含 type, subcategory, title, content 四個欄位。內容如下：';
+
+  const prompt = `${sysPrompt}\n\n${text}`;
+
+  try {
+    if (engine === 'Groq' && groqKey) {
+      const res = UrlFetchApp.fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "post", headers: { "Authorization": `Bearer ${groqKey}`, "Content-Type": "application/json" },
+        muteHttpExceptions: true, payload: JSON.stringify({ model: "llama-3.3-70b-versatile", messages: [{role: "user", content: prompt}], response_format: {type: "json_object"} })
+      });
+      return JSON.parse(JSON.parse(res.getContentText()).choices[0].message.content);
+    } else if (geminiKey) {
+      const res = UrlFetchApp.fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
+        method: "post", headers: { "Content-Type": "application/json" },
+        muteHttpExceptions: true, payload: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } })
+      });
+      return JSON.parse(JSON.parse(res.getContentText()).candidates[0].content.parts[0].text);
+    }
+  } catch (e) { logSystem('WARN', 'LLM 解析失敗', e.toString()); }
+  return { type: "article", subcategory: "未分類", title: "未分類紀錄", content: text };
+}
+
+function updateFullRecord(ss, id, data) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(5000);
+  try {
+    const sheet = ss.getSheetByName('資料');
+    const rows = sheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === id) {
+        if (data.type) sheet.getRange(i + 1, 2).setValue(data.type);
+        if (data.subcategory !== undefined) sheet.getRange(i + 1, 3).setValue(decodeURIComponent(data.subcategory));
+        if (data.title) sheet.getRange(i + 1, 4).setValue(decodeURIComponent(data.title));
+        if (data.content) sheet.getRange(i + 1, 6).setValue(decodeURIComponent(data.content));
+        if (data.icon) sheet.getRange(i + 1, 10).setValue(data.icon);
+        if (data.color) sheet.getRange(i + 1, 11).setValue(data.color);
+        return true;
+      }
+    }
+  } finally { lock.releaseLock(); }
+  return false;
+}
+
+function deleteRecord(ss, id) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(5000);
+  try {
+    const sheet = ss.getSheetByName('資料');
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === id) {
+        const url = data[i][8];
+        if (url && String(url).includes('drive.google.com')) {
+          try {
+            const fileIdMatch = String(url).match(/\/d\/(.+?)\//) || String(url).match(/id=(.+?)(&|$)/);
+            if (fileIdMatch) DriveApp.getFileById(fileIdMatch[1]).setTrashed(true);
+          } catch (e) {}
+        }
+        sheet.deleteRow(i + 1);
+        return true;
+      }
+    }
+  } finally { lock.releaseLock(); }
+  return false;
+}
+
+function doGet(e) {
+  const action = e.parameter.action;
+  const ss = SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
+  
+  if (action === 'export') {
+    const data = ss.getSheetByName('資料').getDataRange().getValues();
+    const csvContent = data.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    return ContentService.createTextOutput(csvContent).setMimeType(ContentService.MimeType.CSV).downloadAsFile("export.csv");
+  }
+
+  if (action === 'deleteBatch' && e.parameter.ids) {
+    const ids = JSON.parse(decodeURIComponent(e.parameter.ids));
+    ids.forEach(id => deleteRecord(ss, id));
+    return ContentService.createTextOutput(JSON.stringify({ success: true })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  if (action === 'delete' && e.parameter.id) {
+    return ContentService.createTextOutput(JSON.stringify({ success: deleteRecord(ss, e.parameter.id) })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  if (action === 'updateFull' && e.parameter.id) {
+    const success = updateFullRecord(ss, e.parameter.id, {
+      title: e.parameter.title, content: e.parameter.content, type: e.parameter.type, subcategory: e.parameter.subcategory
+    });
+    return ContentService.createTextOutput(JSON.stringify({ success })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  try {
+    const cache = CacheService.getScriptCache();
+    const cacheKey = `DATA_${e.parameter.keyword || 'ALL'}_${e.parameter.page || '1'}`;
+    const cachedData = cache.get(cacheKey);
+    if (cachedData) return ContentService.createTextOutput(cachedData).setMimeType(ContentService.MimeType.JSON);
+
+    const data = ss.getSheetByName('資料').getDataRange().getValues();
+    if (data.length <= 1) return ContentService.createTextOutput("[]").setMimeType(ContentService.MimeType.JSON);
+
+    const headers = data[0].map(h => h.toString().toLowerCase());
+    let result = data.slice(1).reverse().map(row => {
+      const obj = {};
+      headers.forEach((h, i) => obj[h] = row[i]);
+      return obj;
+    });
+
+    if (e.parameter.keyword) {
+      const kw = decodeURIComponent(e.parameter.keyword).toLowerCase();
+      result = result.filter(item => (item.title && String(item.title).toLowerCase().includes(kw)) || (item.content && String(item.content).toLowerCase().includes(kw)));
+    }
+
+    if (e.parameter.page && e.parameter.limit) {
+      const start = (parseInt(e.parameter.page, 10) - 1) * parseInt(e.parameter.limit, 10);
+      result = result.slice(start, start + parseInt(e.parameter.limit, 10));
+    }
+    
+    const outputString = JSON.stringify(result);
+    cache.put(cacheKey, outputString, 60);
+    return ContentService.createTextOutput(outputString).setMimeType(ContentService.MimeType.JSON);
+  } catch (error) { return ContentService.createTextOutput(JSON.stringify({error: true, message: "讀取失敗"})).setMimeType(ContentService.MimeType.JSON); }
+}
+
+function doPost(e) {
+  const response = ContentService.createTextOutput("OK").setMimeType(ContentService.MimeType.TEXT);
+  if (!e || !e.postData) return response;
+
+  const ss = SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
+
+  try {
+    const payload = JSON.parse(e.postData.contents);
+    if (payload.action === 'backup' && payload.sourceCode) {
+      const lock = LockService.getScriptLock();
+      lock.waitLock(10000);
+      try {
+        let sheet = ss.getSheetByName('備份');
+        if (!sheet) {
+          sheet = ss.insertSheet('備份');
+          sheet.appendRow(['時間', '前端原始碼']);
+        }
+        sheet.appendRow([new Date(), payload.sourceCode]);
+        return ContentService.createTextOutput(JSON.stringify({ success: true })).setMimeType(ContentService.MimeType.JSON);
+      } finally { lock.releaseLock(); }
+    }
+  } catch(err) {}
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+
+  try {
+    const events = JSON.parse(e.postData.contents).events;
+    if (!events || events.length === 0) return response;
+
+    const settings = ss.getSheetByName('設定').getDataRange().getValues();
+    const cache = CacheService.getScriptCache();
+
+    let token = "";
+    settings.forEach(row => { if (row[0] === 'LINE_ACCESS_TOKEN') token = row[1]; });
+
+    events.forEach(event => {
+      if (event.type === 'message' && event.message.type === 'text') {
+        const text = event.message.text;
+        const urls = text.match(/(https?:\/\/[^\s]+)/g);
+        let analyzeText = text;
+
+        if (urls) {
+          try {
+            const url = urls[0];
+            const htmlText = UrlFetchApp.fetch(url, {muteHttpExceptions: true}).getContentText();
+            const ogTitle = (htmlText.match(/<meta[^>]*property=['"]og:title['"][^>]*content=['"]([^'"]*)['"]/i) || [])[1] || (htmlText.match(/<title>([^<]*?)<\/title>/i) || [])[1] || "";
+            const ogDesc = (htmlText.match(/<meta[^>]*property=['"]og:description['"][^>]*content=['"]([^'"]*)['"]/i) || [])[1] || "";
+            const isSocial = /facebook\.com|instagram\.com|threads\.net|twitter\.com|x\.com/.test(url);
+
+            if (ogTitle || ogDesc) {
+              analyzeText = `網址連結: ${url}\n網頁標題: ${ogTitle}\n網頁摘要: ${ogDesc}`;
+            } else if (isSocial) {
+              analyzeText = `此為社群平台連結: ${url}。平台阻擋抓取，請將其歸類為文章或連結收藏。`;
+            } else {
+              analyzeText = `網址連結: ${url}\n網頁內容擷取: ${htmlText.replace(/<[^>]*>?/gm, '').substring(0, 1500)}`;
+            }
+          } catch(err) { logSystem('WARN', '網頁抓取失敗', urls[0]); }
+        }
+
+        const lastTextId = cache.get('LAST_TEXT_ID');
+        if (lastTextId) {
+          const sheet = ss.getSheetByName('資料');
+          const rows = sheet.getDataRange().getValues();
+          let existingText = "";
+          for (let i = 1; i < rows.length; i++) {
+            if (rows[i][0] === lastTextId) { existingText = rows[i][5]; break; }
+          }
+          const combinedText = existingText ? existingText + "\n" + analyzeText : analyzeText;
+          const llmResult = analyzeWithLLM(combinedText, settings);
+          let icon = '📄', color = 'bg-slate-50 text-slate-700';
+          if (llmResult.type === 'todo') { icon = '☑️'; color = 'bg-amber-50 text-amber-700'; }
+          if (llmResult.type === 'event') { icon = '📅'; color = 'bg-blue-50 text-blue-700'; }
+          if (llmResult.type === 'article') { icon = '📰'; color = 'bg-emerald-50 text-emerald-700'; }
+
+          updateFullRecord(ss, lastTextId, { type: llmResult.type, subcategory: llmResult.subcategory, title: encodeURIComponent(llmResult.title || '合併紀錄'), content: encodeURIComponent(llmResult.content || combinedText), icon, color });
+          cache.put('LAST_TEXT_ID', lastTextId, 120);
+        } else {
+          const llmResult = analyzeWithLLM(analyzeText, settings);
+          let icon = '📄', color = 'bg-slate-50 text-slate-700';
+          if (llmResult.type === 'todo') { icon = '☑️'; color = 'bg-amber-50 text-amber-700'; }
+          if (llmResult.type === 'event') { icon = '📅'; color = 'bg-blue-50 text-blue-700'; }
+          if (llmResult.type === 'article') { icon = '📰'; color = 'bg-emerald-50 text-emerald-700'; }
+
+          const newId = Utilities.getUuid();
+          const sheet = ss.getSheetByName('資料');
+          const now = new Date();
+          sheet.appendRow([ newId, llmResult.type, llmResult.subcategory || '訊息紀錄', llmResult.title || '新紀錄', 'AI 自動分類', llmResult.content || text, Utilities.formatDate(now, "GMT+8", "yyyy-MM-dd"), Utilities.formatDate(now, "GMT+8", "HH:mm"), urls ? urls[0] : '#', icon, color ]);
+          cache.put('LAST_TEXT_ID', newId, 120);
+        }
+      } else if (['image', 'file'].includes(event.message.type)) {
+        handleLineFile(ss, event.message, token, settings);
+      } else if (event.message.type === 'audio') {
+        handleLineAudio(ss, event.message, token, settings);
+      }
+    });
+  } catch (error) { logSystem('ERROR', 'doPost 處理失敗', error.toString()); }
+  finally { lock.releaseLock(); }
+  
+  return response;
+}
+
+function handleLineAudio(ss, msg, token, settings) {
+  try {
+    if (!token) throw new Error("缺少 LINE_ACCESS_TOKEN");
+    
+    const blob = UrlFetchApp.fetch(`https://api-data.line.me/v2/bot/message/${msg.id}/content`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).getBlob();
+    
+    let engine = "Gemini", geminiKey = "", groqKey = "";
+    settings.forEach(row => { 
+      if (row[0] === 'LLM_ENGINE') engine = row[1];
+      if (row[0] === 'GEMINI_API_KEY') geminiKey = row[1];
+      if (row[0] === 'GROQ_API_KEY') groqKey = row[1];
+    });
+
+    let transcribedText = "";
+
+    if (engine === 'Groq' && groqKey) {
+      const res = UrlFetchApp.fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "post", headers: { "Authorization": `Bearer ${groqKey}` },
+        payload: { file: blob.setName('audio.m4a'), model: 'whisper-large-v3', response_format: 'json' },
+        muteHttpExceptions: true
+      });
+      const responseJson = JSON.parse(res.getContentText());
+      if (responseJson.error) throw new Error(responseJson.error.message);
+      transcribedText = responseJson.text;
+    } else if (geminiKey) {
+      const res = UrlFetchApp.fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
+        method: "post", headers: { "Content-Type": "application/json" },
+        muteHttpExceptions: true, payload: JSON.stringify({ contents: [{ parts: [ { text: "請將這段語音轉譯為文字，直接輸出純文字內容即可。" }, { inlineData: { mimeType: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()) } } ] }] })
+      });
+      const responseJson = JSON.parse(res.getContentText());
+      if (responseJson.error) throw new Error(responseJson.error.message);
+      transcribedText = responseJson.candidates[0].content.parts[0].text;
+    }
+
+    if (!transcribedText) throw new Error("轉譯文字為空");
+
+    const llmResult = analyzeWithLLM(`語音內容：${transcribedText}`, settings);
+
+    let icon = '🎤', color = 'bg-purple-50 text-purple-700';
+    if (llmResult.type === 'todo') { icon = '☑️'; color = 'bg-amber-50 text-amber-700'; }
+    if (llmResult.type === 'event') { icon = '📅'; color = 'bg-blue-50 text-blue-700'; }
+
+    const newId = Utilities.getUuid();
+    const sheet = ss.getSheetByName('資料');
+    const now = new Date();
+    sheet.appendRow([ newId, llmResult.type, llmResult.subcategory || '訊息紀錄', llmResult.title || '語音紀錄', '語音轉譯', llmResult.content || transcribedText, Utilities.formatDate(now, "GMT+8", "yyyy-MM-dd"), Utilities.formatDate(now, "GMT+8", "HH:mm"), '#', icon, color ]);
+  } catch (e) { logSystem('ERROR', '語音處理失敗', e.toString()); }
+}
+
+function handleLineFile(ss, msg, token, settings) {
+  try {
+    if (!token) throw new Error("缺少 LINE_ACCESS_TOKEN");
+    
+    const blob = UrlFetchApp.fetch(`https://api-data.line.me/v2/bot/message/${msg.id}/content`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    }).getBlob();
+    
+    let folderId = "", engine = "Gemini";
+    settings.forEach(row => { 
+      if (row[0] === 'DRIVE_FOLDER_ID') folderId = row[1]; 
+      if (row[0] === 'LLM_ENGINE') engine = row[1];
+    });
+    
+    const folder = folderId ? DriveApp.getFolderById(folderId) : DriveApp.getRootFolder();
+    
+    const datePrefix = Utilities.formatDate(new Date(), "GMT+8", "yyyyMMdd");
+    const originalName = msg.fileName || (msg.type === 'image' ? 'Line_image.jpg' : 'unknown_file');
+    const fileName = `${datePrefix}_${originalName}`;
+    
+    const file = folder.createFile(blob.setName(fileName));
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    const isImage = msg.type === 'image';
+    const cache = CacheService.getScriptCache();
+    const cacheKey = 'LAST_IMG_ID';
+
+    if (isImage) {
+      const lastId = cache.get(cacheKey);
+      if (lastId) {
+        const data = ss.getSheetByName('資料').getDataRange().getValues();
+        for (let i = 1; i < data.length; i++) {
+          if (data[i][0] === lastId) {
+            const sheet = ss.getSheetByName('資料');
+            sheet.getRange(i + 1, 6).setValue(data[i][5] + '\n附加檔案: ' + fileName);
+            sheet.getRange(i + 1, 9).setValue(data[i][8] + '\n' + file.getUrl());
+            return;
+          }
+        }
+      }
+    }
+    
+    let llmResult;
+    
+    if (engine === 'Groq') {
+      let extractedText = "";
+      try {
+        const tempDoc = Drive.Files.create({ name: "OCR_Temp", mimeType: "application/vnd.google-apps.document" }, blob);
+        extractedText = DocumentApp.openById(tempDoc.id).getBody().getText();
+        DriveApp.getFileById(tempDoc.id).setTrashed(true);
+      } catch (e) {
+        logSystem('WARN', 'OCR 處理異常', e.toString());
+        extractedText = `無法讀取內容`;
+      }
+      const analyzeText = `檔案名稱：${fileName}。內容：${extractedText.substring(0, 1500)}。請根據內容判斷這是否屬於行程、計畫申請或具體活動。`;
+      llmResult = analyzeWithLLM(analyzeText, settings);
+    } else {
+      let geminiKey = "";
+      settings.forEach(row => { if (row[0] === 'GEMINI_API_KEY') geminiKey = row[1]; });
+      try {
+        const res = UrlFetchApp.fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
+          method: "post", headers: { "Content-Type": "application/json" }, muteHttpExceptions: true,
+          payload: JSON.stringify({ contents: [{ parts: [ { text: `分析此檔案內容與檔名「${fileName}」。回傳 JSON，含 type, subcategory, title, content。` }, { inlineData: { mimeType: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()) } } ] }], generationConfig: { responseMimeType: "application/json" } })
+        });
+        llmResult = JSON.parse(JSON.parse(res.getContentText()).candidates[0].content.parts[0].text);
+      } catch(e) {
+        llmResult = { type: 'article', subcategory: '未分類', title: fileName, content: '分析失敗或不支援該格式' };
+      }
+    }
+    
+    let icon = '📁', color = 'bg-emerald-50 text-emerald-700';
+    if (llmResult.type === 'event') { icon = '📅'; color = 'bg-blue-50 text-blue-700'; }
+
+    const newId = Utilities.getUuid();
+    if (isImage) cache.put(cacheKey, newId, 60);
+    
+    const sheet = ss.getSheetByName('資料');
+    const now = new Date();
+    sheet.appendRow([ newId, llmResult.type === 'event' ? 'event' : 'file', llmResult.subcategory || '檔案上傳', llmResult.title || fileName, '檔案上傳', llmResult.content || '自動備份至雲端', Utilities.formatDate(now, "GMT+8", "yyyy-MM-dd"), Utilities.formatDate(now, "GMT+8", "HH:mm"), file.getUrl(), icon, color ]);
+  } catch (e) { logSystem('ERROR', '檔案存儲失敗', e.toString()); }
+} */
   </script>
 
   <script type="text/babel">
