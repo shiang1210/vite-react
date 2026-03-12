@@ -35,6 +35,17 @@
     /* 系統將讀取此區塊內容傳送至 GAS 進行備份，請手動更新此處存放完整程式碼 */
   </script>
 
+  <!-- 全域系統診斷與救援工具 (獨立於 React，確保系統崩潰時仍可執行) -->
+  <script>
+    window.runSystemDiagnostics = function() {
+      console.log("=== 啟動系統診斷 ===");
+      console.log("清除異常快取資料...");
+      localStorage.clear();
+      alert("快取已強制清除，系統即將重啟。");
+      window.location.reload(true);
+    };
+  </script>
+
   <script type="text/babel">
     const { useState, useEffect, useCallback, useMemo } = React;
 
@@ -58,16 +69,6 @@
 
       const GAS_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
       const LIFF_ID = '2009406684-H9fk9ysT';
-
-      useEffect(() => {
-        window.runSystemDiagnostics = () => {
-          console.log("=== 啟動系統診斷 ===");
-          console.log("清除異常快取資料...");
-          localStorage.removeItem('infoWallCache');
-          alert("快取已強制清除，系統即將重啟。");
-          window.location.reload();
-        };
-      }, []);
 
       const showMessage = (msg) => {
         setMessage(msg);
