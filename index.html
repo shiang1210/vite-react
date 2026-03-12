@@ -1,411 +1,877 @@
-const PROPS = PropertiesService.getScriptProperties();
-
-function initializeSystem() {
-  const tempDoc = DocumentApp.create('Auth_Temp');
-  DriveApp.getFileById(tempDoc.getId()).setTrashed(true);
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📋</text></svg>">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>智能資訊牆 V12.1</title>
   
-  const sheetId = PROPS.getProperty('SHEET_ID');
-  if (!sheetId) return "錯誤：請先在指令碼屬性設定 SHEET_ID";
+  <style>
+    body { margin: 0; padding: 0; min-height: 100vh; overflow-x: hidden; }
+    #initial-loader {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background-color: #f8fafc; z-index: 9999; transition: opacity 0.5s;
+    }
+    .spinner {
+      width: 40px; height: 40px; border: 4px solid #cbd5e1; border-top-color: #4f46e5;
+      border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.8/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-200">
   
-  const ss = SpreadsheetApp.openById(sheetId);
-  const requiredSheets = ['資料', '設定', '99_系統日誌', '備份'];
+  <div id="initial-loader"><div class="spinner"></div></div>
+  <div id="root" class="min-h-screen w-full flex flex-col items-center"></div>
+
+  <script type="text/plain" id="appSource">
+    /* <!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📋</text></svg>">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>智能資訊牆 V12.1</title>
   
-  requiredSheets.forEach(name => {
-    if (!ss.getSheetByName(name)) {
-      const sheet = ss.insertSheet(name);
-      if (name === '資料') {
-        sheet.appendRow(['ID', 'Type', 'SubCategory', 'Title', 'Subtitle', 'Content', 'Date', 'Time', 'URL', 'Icon', 'Color']);
-        sheet.setFrozenRows(1);
-      } else if (name === '設定') {
-        sheet.appendRow(['LLM_ENGINE', 'Gemini']);
-        sheet.appendRow(['GEMINI_API_KEY', '請填寫金鑰']);
-        sheet.appendRow(['GROQ_API_KEY', '請填寫金鑰']);
-        sheet.appendRow(['LINE_ACCESS_TOKEN', '請填寫Token']);
-        sheet.appendRow(['DRIVE_FOLDER_ID', '請填寫資料夾ID']);
-        sheet.appendRow(['SYSTEM_PROMPT', '請綜合分析以下完整內容。若是待辦事項，請回傳 type 為 "todo"，title 為任務名稱，content 條列待辦。若是行程時間、計畫申請或含有具體日期的活動，type 為 "event"，title 為行程名稱，content 為詳細說明與時間。若是文章、連結摘要或一般檔案，type 為 "article"，並請務必根據內容生成一個對應的分類標籤放入 subcategory 欄位(例如：科技、設計、管理等)，title 為主旨，content 為綜合摘要。務必只回傳純 JSON 格式，包含 type, subcategory, title, content 四個欄位。內容如下：']);
-        sheet.setFrozenRows(1);
-      } else if (name === '備份') {
-        sheet.appendRow(['時間', '前端原始碼']);
-        sheet.setFrozenRows(1);
-      }
+  <style>
+    body { margin: 0; padding: 0; min-height: 100vh; overflow-x: hidden; }
+    #initial-loader {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background-color: #f8fafc; z-index: 9999; transition: opacity 0.5s;
     }
-  });
-  return "初始化完成";
-}
-
-function logSystem(level, msg, detail = "") {
-  try {
-    const ss = SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
-    const sheet = ss.getSheetByName('99_系統日誌') || ss.insertSheet('99_系統日誌');
-    sheet.appendRow([new Date(), level, msg, detail]);
-  } catch (e) {}
-}
-
-function analyzeWithLLM(text, settings) {
-  let engine = "Gemini", geminiKey = "", groqKey = "", sysPrompt = "";
-  settings.forEach(row => {
-    if (row[0] === 'LLM_ENGINE') engine = row[1];
-    if (row[0] === 'GEMINI_API_KEY') geminiKey = row[1];
-    if (row[0] === 'GROQ_API_KEY') groqKey = row[1];
-    if (row[0] === 'SYSTEM_PROMPT') sysPrompt = row[1];
-  });
-
-  if (!sysPrompt) sysPrompt = '請綜合分析以下完整內容。若是待辦事項，請回傳 type 為 "todo"，title 為任務名稱，content 條列待辦。若是行程時間、計畫申請或含有具體日期的活動，type 為 "event"，title 為行程名稱，content 為詳細說明與時間。若是文章、連結摘要或一般檔案，type 為 "article"，並請務必根據內容生成一個對應的分類標籤放入 subcategory 欄位(例如：科技、設計、管理等)，title 為主旨，content 為綜合摘要。務必只回傳純 JSON 格式，包含 type, subcategory, title, content 四個欄位。內容如下：';
-
-  const prompt = `${sysPrompt}\n\n${text}`;
-
-  try {
-    if (engine === 'Groq' && groqKey) {
-      const res = UrlFetchApp.fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "post", headers: { "Authorization": `Bearer ${groqKey}`, "Content-Type": "application/json" },
-        muteHttpExceptions: true, payload: JSON.stringify({ model: "llama-3.3-70b-versatile", messages: [{role: "user", content: prompt}], response_format: {type: "json_object"} })
-      });
-      return JSON.parse(JSON.parse(res.getContentText()).choices[0].message.content);
-    } else if (geminiKey) {
-      const res = UrlFetchApp.fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
-        method: "post", headers: { "Content-Type": "application/json" },
-        muteHttpExceptions: true, payload: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } })
-      });
-      return JSON.parse(JSON.parse(res.getContentText()).candidates[0].content.parts[0].text);
+    .spinner {
+      width: 40px; height: 40px; border: 4px solid #cbd5e1; border-top-color: #4f46e5;
+      border-radius: 50%; animation: spin 1s linear infinite;
     }
-  } catch (e) { logSystem('WARN', 'LLM 解析失敗', e.toString()); }
-  return { type: "article", subcategory: "未分類", title: "未分類紀錄", content: text };
-}
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 
-function updateFullRecord(ss, id, data) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(5000);
-  try {
-    const sheet = ss.getSheetByName('資料');
-    const rows = sheet.getDataRange().getValues();
-    for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === id) {
-        if (data.type) sheet.getRange(i + 1, 2).setValue(data.type);
-        if (data.subcategory !== undefined) sheet.getRange(i + 1, 3).setValue(decodeURIComponent(data.subcategory));
-        if (data.title) sheet.getRange(i + 1, 4).setValue(decodeURIComponent(data.title));
-        if (data.content) sheet.getRange(i + 1, 6).setValue(decodeURIComponent(data.content));
-        if (data.icon) sheet.getRange(i + 1, 10).setValue(data.icon);
-        if (data.color) sheet.getRange(i + 1, 11).setValue(data.color);
-        return true;
-      }
-    }
-  } finally { lock.releaseLock(); }
-  return false;
-}
-
-function deleteRecord(ss, id) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(5000);
-  try {
-    const sheet = ss.getSheetByName('資料');
-    const data = sheet.getDataRange().getValues();
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === id) {
-        const url = data[i][8];
-        if (url && String(url).includes('drive.google.com')) {
-          try {
-            const fileIdMatch = String(url).match(/\/d\/(.+?)\//) || String(url).match(/id=(.+?)(&|$)/);
-            if (fileIdMatch) DriveApp.getFileById(fileIdMatch[1]).setTrashed(true);
-          } catch (e) {}
-        }
-        sheet.deleteRow(i + 1);
-        return true;
-      }
-    }
-  } finally { lock.releaseLock(); }
-  return false;
-}
-
-function doGet(e) {
-  const action = e.parameter.action;
-  const ss = SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.8/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-200">
   
-  if (action === 'export') {
-    const data = ss.getSheetByName('資料').getDataRange().getValues();
-    const csvContent = data.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
-    return ContentService.createTextOutput(csvContent).setMimeType(ContentService.MimeType.CSV).downloadAsFile("export.csv");
-  }
+  <div id="initial-loader"><div class="spinner"></div></div>
+  <div id="root" class="min-h-screen w-full flex flex-col items-center"></div>
 
-  if (action === 'deleteBatch' && e.parameter.ids) {
-    const ids = JSON.parse(decodeURIComponent(e.parameter.ids));
-    ids.forEach(id => deleteRecord(ss, id));
-    return ContentService.createTextOutput(JSON.stringify({ success: true })).setMimeType(ContentService.MimeType.JSON);
-  }
+  <script type="text/plain" id="appSource">
+    /* 系統將讀取此區塊內容傳送至 GAS 進行備份，請手動更新此處存放完整程式碼 */
+  </script>
 
-  if (action === 'delete' && e.parameter.id) {
-    return ContentService.createTextOutput(JSON.stringify({ success: deleteRecord(ss, e.parameter.id) })).setMimeType(ContentService.MimeType.JSON);
-  }
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useMemo } = React;
 
-  if (action === 'updateFull' && e.parameter.id) {
-    const success = updateFullRecord(ss, e.parameter.id, {
-      title: e.parameter.title, content: e.parameter.content, type: e.parameter.type, subcategory: e.parameter.subcategory
-    });
-    return ContentService.createTextOutput(JSON.stringify({ success })).setMimeType(ContentService.MimeType.JSON);
-  }
+    function App() {
+      const [items, setItems] = useState([]);
+      const [filter, setFilter] = useState('全部');
+      const [subFilter, setSubFilter] = useState('全部');
+      const [profile, setProfile] = useState(null);
+      const [isLoading, setIsLoading] = useState(true);
+      const [keyword, setKeyword] = useState('');
+      const [page, setPage] = useState(1);
+      const [hasMore, setHasMore] = useState(true);
+      const [isDarkMode, setIsDarkMode] = useState(true);
+      const [isManageMode, setIsManageMode] = useState(false);
+      const [selectedIds, setSelectedIds] = useState(new Set());
+      const [editingItem, setEditingItem] = useState(null);
+      const [confirmDelete, setConfirmDelete] = useState(null);
+      const [message, setMessage] = useState(null);
+      const [isProcessing, setIsProcessing] = useState(false);
+      const [isError, setIsError] = useState(false);
 
-  try {
-    const cache = CacheService.getScriptCache();
-    const cacheKey = `DATA_${e.parameter.keyword || 'ALL'}_${e.parameter.page || '1'}`;
-    const cachedData = cache.get(cacheKey);
-    if (cachedData) return ContentService.createTextOutput(cachedData).setMimeType(ContentService.MimeType.JSON);
+      const GAS_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
+      const LIFF_ID = '2009406684-H9fk9ysT';
 
-    const data = ss.getSheetByName('資料').getDataRange().getValues();
-    if (data.length <= 1) return ContentService.createTextOutput("[]").setMimeType(ContentService.MimeType.JSON);
+      const showMessage = (msg) => {
+        setMessage(msg);
+        setTimeout(() => setMessage(null), 3000);
+      };
 
-    const headers = data[0].map(h => h.toString().toLowerCase());
-    let result = data.slice(1).reverse().map(row => {
-      const obj = {};
-      headers.forEach((h, i) => obj[h] = row[i]);
-      return obj;
-    });
-
-    if (e.parameter.keyword) {
-      const kw = decodeURIComponent(e.parameter.keyword).toLowerCase();
-      result = result.filter(item => (item.title && String(item.title).toLowerCase().includes(kw)) || (item.content && String(item.content).toLowerCase().includes(kw)));
-    }
-
-    if (e.parameter.page && e.parameter.limit) {
-      const start = (parseInt(e.parameter.page, 10) - 1) * parseInt(e.parameter.limit, 10);
-      result = result.slice(start, start + parseInt(e.parameter.limit, 10));
-    }
-    
-    const outputString = JSON.stringify(result);
-    cache.put(cacheKey, outputString, 60);
-    return ContentService.createTextOutput(outputString).setMimeType(ContentService.MimeType.JSON);
-  } catch (error) { return ContentService.createTextOutput(JSON.stringify({error: true, message: "讀取失敗"})).setMimeType(ContentService.MimeType.JSON); }
-}
-
-function doPost(e) {
-  const response = ContentService.createTextOutput("OK").setMimeType(ContentService.MimeType.TEXT);
-  if (!e || !e.postData) return response;
-
-  const ss = SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
-
-  try {
-    const payload = JSON.parse(e.postData.contents);
-    if (payload.action === 'backup' && payload.sourceCode) {
-      const lock = LockService.getScriptLock();
-      lock.waitLock(10000);
-      try {
-        let sheet = ss.getSheetByName('備份');
-        if (!sheet) {
-          sheet = ss.insertSheet('備份');
-          sheet.appendRow(['時間', '前端原始碼']);
-        }
-        sheet.appendRow([new Date(), payload.sourceCode]);
-        return ContentService.createTextOutput(JSON.stringify({ success: true })).setMimeType(ContentService.MimeType.JSON);
-      } finally { lock.releaseLock(); }
-    }
-  } catch(err) {}
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-
-  try {
-    const events = JSON.parse(e.postData.contents).events;
-    if (!events || events.length === 0) return response;
-
-    const settings = ss.getSheetByName('設定').getDataRange().getValues();
-    const cache = CacheService.getScriptCache();
-
-    let token = "";
-    settings.forEach(row => { if (row[0] === 'LINE_ACCESS_TOKEN') token = row[1]; });
-
-    events.forEach(event => {
-      if (event.type === 'message' && event.message.type === 'text') {
-        const text = event.message.text;
-        const urls = text.match(/(https?:\/\/[^\s]+)/g);
-        let analyzeText = text;
-
-        if (urls) {
-          try {
-            const url = urls[0];
-            const htmlText = UrlFetchApp.fetch(url, {muteHttpExceptions: true}).getContentText();
-            const ogTitle = (htmlText.match(/<meta[^>]*property=['"]og:title['"][^>]*content=['"]([^'"]*)['"]/i) || [])[1] || (htmlText.match(/<title>([^<]*?)<\/title>/i) || [])[1] || "";
-            const ogDesc = (htmlText.match(/<meta[^>]*property=['"]og:description['"][^>]*content=['"]([^'"]*)['"]/i) || [])[1] || "";
-            const isSocial = /facebook\.com|instagram\.com|threads\.net|twitter\.com|x\.com/.test(url);
-
-            if (ogTitle || ogDesc) {
-              analyzeText = `網址連結: ${url}\n網頁標題: ${ogTitle}\n網頁摘要: ${ogDesc}`;
-            } else if (isSocial) {
-              analyzeText = `此為社群平台連結: ${url}。平台阻擋抓取，請將其歸類為文章或連結收藏。`;
+      const fetchData = useCallback(async (searchKw = '', pageNum = 1) => {
+        setIsLoading(true);
+        setIsError(false);
+        try {
+          let url = `${GAS_URL}?limit=20&page=${pageNum}`;
+          if (searchKw) url += `&keyword=${encodeURIComponent(searchKw)}`;
+          
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+          
+          const res = await fetch(url, { redirect: 'follow', signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            if (pageNum === 1) {
+              setItems(data);
+              localStorage.setItem('infoWallCache', JSON.stringify(data));
             } else {
-              analyzeText = `網址連結: ${url}\n網頁內容擷取: ${htmlText.replace(/<[^>]*>?/gm, '').substring(0, 1500)}`;
+              setItems(prev => {
+                const newData = [...prev, ...data];
+                localStorage.setItem('infoWallCache', JSON.stringify(newData));
+                return newData;
+              });
             }
-          } catch(err) { logSystem('WARN', '網頁抓取失敗', urls[0]); }
-        }
-
-        const lastTextId = cache.get('LAST_TEXT_ID');
-        if (lastTextId) {
-          const sheet = ss.getSheetByName('資料');
-          const rows = sheet.getDataRange().getValues();
-          let existingText = "";
-          for (let i = 1; i < rows.length; i++) {
-            if (rows[i][0] === lastTextId) { existingText = rows[i][5]; break; }
+            setHasMore(data.length === 20);
           }
-          const combinedText = existingText ? existingText + "\n" + analyzeText : analyzeText;
-          const llmResult = analyzeWithLLM(combinedText, settings);
-          let icon = '📄', color = 'bg-slate-50 text-slate-700';
-          if (llmResult.type === 'todo') { icon = '☑️'; color = 'bg-amber-50 text-amber-700'; }
-          if (llmResult.type === 'event') { icon = '📅'; color = 'bg-blue-50 text-blue-700'; }
-          if (llmResult.type === 'article') { icon = '📰'; color = 'bg-emerald-50 text-emerald-700'; }
-
-          updateFullRecord(ss, lastTextId, { type: llmResult.type, subcategory: llmResult.subcategory, title: encodeURIComponent(llmResult.title || '合併紀錄'), content: encodeURIComponent(llmResult.content || combinedText), icon, color });
-          cache.put('LAST_TEXT_ID', lastTextId, 120);
-        } else {
-          const llmResult = analyzeWithLLM(analyzeText, settings);
-          let icon = '📄', color = 'bg-slate-50 text-slate-700';
-          if (llmResult.type === 'todo') { icon = '☑️'; color = 'bg-amber-50 text-amber-700'; }
-          if (llmResult.type === 'event') { icon = '📅'; color = 'bg-blue-50 text-blue-700'; }
-          if (llmResult.type === 'article') { icon = '📰'; color = 'bg-emerald-50 text-emerald-700'; }
-
-          const newId = Utilities.getUuid();
-          const sheet = ss.getSheetByName('資料');
-          const now = new Date();
-          sheet.appendRow([ newId, llmResult.type, llmResult.subcategory || '訊息紀錄', llmResult.title || '新紀錄', 'AI 自動分類', llmResult.content || text, Utilities.formatDate(now, "GMT+8", "yyyy-MM-dd"), Utilities.formatDate(now, "GMT+8", "HH:mm"), urls ? urls[0] : '#', icon, color ]);
-          cache.put('LAST_TEXT_ID', newId, 120);
+        } catch (e) {
+          console.error(e);
+          setIsError(true);
+          showMessage("資料讀取失敗，請檢查網路狀態");
+        } finally {
+          setIsLoading(false);
         }
-      } else if (['image', 'file'].includes(event.message.type)) {
-        handleLineFile(ss, event.message, token, settings);
-      } else if (event.message.type === 'audio') {
-        handleLineAudio(ss, event.message, token, settings);
-      }
-    });
-  } catch (error) { logSystem('ERROR', 'doPost 處理失敗', error.toString()); }
-  finally { lock.releaseLock(); }
-  
-  return response;
-}
+      }, [GAS_URL]);
 
-function handleLineAudio(ss, msg, token, settings) {
-  try {
-    if (!token) throw new Error("缺少 LINE_ACCESS_TOKEN");
-    
-    const blob = UrlFetchApp.fetch(`https://api-data.line.me/v2/bot/message/${msg.id}/content`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    }).getBlob();
-    
-    let engine = "Gemini", geminiKey = "", groqKey = "";
-    settings.forEach(row => { 
-      if (row[0] === 'LLM_ENGINE') engine = row[1];
-      if (row[0] === 'GEMINI_API_KEY') geminiKey = row[1];
-      if (row[0] === 'GROQ_API_KEY') groqKey = row[1];
-    });
+      useEffect(() => {
+        const init = async () => {
+          document.getElementById('initial-loader').style.opacity = '0';
+          setTimeout(() => document.getElementById('initial-loader').style.display = 'none', 500);
 
-    let transcribedText = "";
-
-    if (engine === 'Groq' && groqKey) {
-      const res = UrlFetchApp.fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-        method: "post", headers: { "Authorization": `Bearer ${groqKey}` },
-        payload: { file: blob.setName('audio.m4a'), model: 'whisper-large-v3', response_format: 'json' },
-        muteHttpExceptions: true
-      });
-      const responseJson = JSON.parse(res.getContentText());
-      if (responseJson.error) throw new Error(responseJson.error.message);
-      transcribedText = responseJson.text;
-    } else if (geminiKey) {
-      const res = UrlFetchApp.fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
-        method: "post", headers: { "Content-Type": "application/json" },
-        muteHttpExceptions: true, payload: JSON.stringify({ contents: [{ parts: [ { text: "請將這段語音轉譯為文字，直接輸出純文字內容即可。" }, { inlineData: { mimeType: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()) } } ] }] })
-      });
-      const responseJson = JSON.parse(res.getContentText());
-      if (responseJson.error) throw new Error(responseJson.error.message);
-      transcribedText = responseJson.candidates[0].content.parts[0].text;
-    }
-
-    if (!transcribedText) throw new Error("轉譯文字為空");
-
-    const llmResult = analyzeWithLLM(`語音內容：${transcribedText}`, settings);
-
-    let icon = '🎤', color = 'bg-purple-50 text-purple-700';
-    if (llmResult.type === 'todo') { icon = '☑️'; color = 'bg-amber-50 text-amber-700'; }
-    if (llmResult.type === 'event') { icon = '📅'; color = 'bg-blue-50 text-blue-700'; }
-
-    const newId = Utilities.getUuid();
-    const sheet = ss.getSheetByName('資料');
-    const now = new Date();
-    sheet.appendRow([ newId, llmResult.type, llmResult.subcategory || '訊息紀錄', llmResult.title || '語音紀錄', '語音轉譯', llmResult.content || transcribedText, Utilities.formatDate(now, "GMT+8", "yyyy-MM-dd"), Utilities.formatDate(now, "GMT+8", "HH:mm"), '#', icon, color ]);
-  } catch (e) { logSystem('ERROR', '語音處理失敗', e.toString()); }
-}
-
-function handleLineFile(ss, msg, token, settings) {
-  try {
-    if (!token) throw new Error("缺少 LINE_ACCESS_TOKEN");
-    
-    const blob = UrlFetchApp.fetch(`https://api-data.line.me/v2/bot/message/${msg.id}/content`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    }).getBlob();
-    
-    let folderId = "", engine = "Gemini";
-    settings.forEach(row => { 
-      if (row[0] === 'DRIVE_FOLDER_ID') folderId = row[1]; 
-      if (row[0] === 'LLM_ENGINE') engine = row[1];
-    });
-    
-    const folder = folderId ? DriveApp.getFolderById(folderId) : DriveApp.getRootFolder();
-    
-    const datePrefix = Utilities.formatDate(new Date(), "GMT+8", "yyyyMMdd");
-    const originalName = msg.fileName || (msg.type === 'image' ? 'Line_image.jpg' : 'unknown_file');
-    const fileName = `${datePrefix}_${originalName}`;
-    
-    const file = folder.createFile(blob.setName(fileName));
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-
-    const isImage = msg.type === 'image';
-    const cache = CacheService.getScriptCache();
-    const cacheKey = 'LAST_IMG_ID';
-
-    if (isImage) {
-      const lastId = cache.get(cacheKey);
-      if (lastId) {
-        const data = ss.getSheetByName('資料').getDataRange().getValues();
-        for (let i = 1; i < data.length; i++) {
-          if (data[i][0] === lastId) {
-            const sheet = ss.getSheetByName('資料');
-            sheet.getRange(i + 1, 6).setValue(data[i][5] + '\n附加檔案: ' + fileName);
-            sheet.getRange(i + 1, 9).setValue(data[i][8] + '\n' + file.getUrl());
-            return;
+          const cached = localStorage.getItem('infoWallCache');
+          if (cached) {
+            try {
+              setItems(JSON.parse(cached));
+              setIsLoading(false);
+            } catch (e) { localStorage.removeItem('infoWallCache'); }
           }
-        }
-      }
-    }
-    
-    let llmResult;
-    
-    if (engine === 'Groq') {
-      let extractedText = "";
-      try {
-        const tempDoc = Drive.Files.create({ name: "OCR_Temp", mimeType: "application/vnd.google-apps.document" }, blob);
-        extractedText = DocumentApp.openById(tempDoc.id).getBody().getText();
-        DriveApp.getFileById(tempDoc.id).setTrashed(true);
-      } catch (e) {
-        logSystem('WARN', 'OCR 處理異常', e.toString());
-        extractedText = `無法讀取內容`;
-      }
-      const analyzeText = `檔案名稱：${fileName}。內容：${extractedText.substring(0, 1500)}。請根據內容判斷這是否屬於行程、計畫申請或具體活動。`;
-      llmResult = analyzeWithLLM(analyzeText, settings);
-    } else {
-      let geminiKey = "";
-      settings.forEach(row => { if (row[0] === 'GEMINI_API_KEY') geminiKey = row[1]; });
-      try {
-        const res = UrlFetchApp.fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`, {
-          method: "post", headers: { "Content-Type": "application/json" }, muteHttpExceptions: true,
-          payload: JSON.stringify({ contents: [{ parts: [ { text: `分析此檔案內容與檔名「${fileName}」。回傳 JSON，含 type, subcategory, title, content。` }, { inlineData: { mimeType: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()) } } ] }], generationConfig: { responseMimeType: "application/json" } })
+
+          if (window.liff) {
+            try {
+              await window.liff.init({ liffId: LIFF_ID });
+              if (window.liff.isLoggedIn()) setProfile(await window.liff.getProfile());
+            } catch (e) { console.error(e); }
+          }
+          fetchData('', 1);
+        };
+        init();
+      }, [fetchData]);
+
+      useEffect(() => {
+        if (page > 1) fetchData(keyword, page);
+      }, [page, keyword, fetchData]);
+
+      useEffect(() => {
+        const handleScroll = () => {
+          if (window.innerHeight + document.documentElement.scrollTop >= document.documentElement.offsetHeight - 100) {
+            if (!isLoading && hasMore) setPage(p => p + 1);
+          }
+        };
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+      }, [isLoading, hasMore]);
+
+      const toggleSelection = (id) => {
+        const newSet = new Set(selectedIds);
+        if (newSet.has(id)) newSet.delete(id);
+        else newSet.add(id);
+        setSelectedIds(newSet);
+      };
+
+      const handleBatchDelete = async () => {
+        if (selectedIds.size === 0) return;
+        setIsProcessing(true);
+        try {
+          const idsArray = Array.from(selectedIds);
+          const target = `${GAS_URL}?action=deleteBatch&ids=${encodeURIComponent(JSON.stringify(idsArray))}`;
+          const res = await fetch(target, { redirect: 'follow' });
+          const result = await res.json();
+          if (result?.success) {
+            setItems(prev => {
+              const newData = prev.filter(i => !selectedIds.has(i.id));
+              localStorage.setItem('infoWallCache', JSON.stringify(newData));
+              return newData;
+            });
+            showMessage(`已刪除 ${selectedIds.size} 筆資料`);
+            setSelectedIds(new Set());
+            setIsManageMode(false);
+          } else { showMessage("批次刪除失敗"); }
+        } catch (e) { showMessage("網路連線錯誤"); }
+        setIsProcessing(false);
+      };
+
+      const executeDelete = async () => {
+        if (!confirmDelete) return;
+        setIsProcessing(true);
+        try {
+          const target = `${GAS_URL}?action=delete&id=${confirmDelete.id}&url=${encodeURIComponent(confirmDelete.url)}`;
+          const res = await fetch(target, { redirect: 'follow' });
+          const result = await res.json();
+          if (result?.success) {
+            setItems(prev => {
+              const newData = prev.filter(i => i.id !== confirmDelete.id);
+              localStorage.setItem('infoWallCache', JSON.stringify(newData));
+              return newData;
+            });
+            showMessage("刪除成功");
+          } else { showMessage("刪除失敗"); }
+        } catch (e) { showMessage("網路連線錯誤"); }
+        setIsProcessing(false);
+        setConfirmDelete(null);
+      };
+
+      const saveEdit = async () => {
+        if (!editingItem) return;
+        setIsProcessing(true);
+        try {
+          const params = new URLSearchParams();
+          params.append('action', 'updateFull');
+          params.append('id', editingItem.id);
+          params.append('title', encodeURIComponent(editingItem.title));
+          params.append('content', encodeURIComponent(editingItem.content));
+          params.append('type', editingItem.type);
+          params.append('subcategory', encodeURIComponent(editingItem.subcategory || ''));
+
+          const res = await fetch(`${GAS_URL}?${params.toString()}`, { redirect: 'follow', method: 'POST' });
+          const result = await res.json();
+          if (result?.success) {
+            setItems(prev => {
+              const newData = prev.map(i => i.id === editingItem.id ? editingItem : i);
+              localStorage.setItem('infoWallCache', JSON.stringify(newData));
+              return newData;
+            });
+            showMessage("更新成功");
+          } else { showMessage("更新失敗"); }
+        } catch (e) { showMessage("網路錯誤"); }
+        setIsProcessing(false);
+        setEditingItem(null);
+      };
+
+      const handleBackup = async () => {
+        const sourceCode = document.getElementById('appSource')?.textContent?.trim();
+        if (!sourceCode) return showMessage("備份失敗：未找到 appSource 區塊");
+        setIsProcessing(true);
+        try {
+          const res = await fetch(GAS_URL, {
+            redirect: 'follow',
+            method: 'POST',
+            body: JSON.stringify({ action: 'backup', sourceCode })
+          });
+          const result = await res.json();
+          if (result?.success) showMessage("原始碼備份成功");
+          else showMessage("備份寫入失敗");
+        } catch (e) { showMessage("備份連線錯誤"); }
+        setIsProcessing(false);
+      };
+
+      const handleSearch = (e) => {
+        e.preventDefault();
+        setPage(1);
+        fetchData(keyword, 1);
+      };
+
+      const getThumbnail = (url) => {
+        if (!url || !url.includes('drive.google.com')) return null;
+        const match = url.match(/\/d\/(.+?)\//) || url.match(/id=(.+?)(&|$)/);
+        return match ? `https://drive.google.com/thumbnail?id=${match[1]}&sz=w400` : null;
+      };
+
+      const generateCalendarUrl = (title, details) => {
+        const url = new URL('https://calendar.google.com/calendar/render');
+        url.searchParams.append('action', 'TEMPLATE');
+        url.searchParams.append('text', title || '');
+        url.searchParams.append('details', details || '');
+        return url.toString();
+      };
+
+      const filterMap = { '全部': 'all', '待辦': 'todo', '行程': 'event', '好文': 'article', '檔案': 'file' };
+      
+      const subcategories = useMemo(() => {
+        const subs = items.filter(i => i.type === 'article').map(i => i.subcategory || '未分類');
+        return ['全部', ...new Set(subs)];
+      }, [items]);
+
+      const filtered = useMemo(() => {
+        return items.filter(i => {
+          const typeMatch = filter === '全部' ? true : i.type === filterMap[filter];
+          const subMatch = (filter === '好文' && subFilter !== '全部') ? (i.subcategory === subFilter || (!i.subcategory && subFilter === '未分類')) : true;
+          return typeMatch && subMatch;
         });
-        llmResult = JSON.parse(JSON.parse(res.getContentText()).candidates[0].content.parts[0].text);
-      } catch(e) {
-        llmResult = { type: 'article', subcategory: '未分類', title: fileName, content: '分析失敗或不支援該格式' };
-      }
-    }
-    
-    let icon = '📁', color = 'bg-emerald-50 text-emerald-700';
-    if (llmResult.type === 'event') { icon = '📅'; color = 'bg-blue-50 text-blue-700'; }
+      }, [items, filter, subFilter]);
 
-    const newId = Utilities.getUuid();
-    if (isImage) cache.put(cacheKey, newId, 60);
-    
-    const sheet = ss.getSheetByName('資料');
-    const now = new Date();
-    sheet.appendRow([ newId, llmResult.type === 'event' ? 'event' : 'file', llmResult.subcategory || '檔案上傳', llmResult.title || fileName, '檔案上傳', llmResult.content || '自動備份至雲端', Utilities.formatDate(now, "GMT+8", "yyyy-MM-dd"), Utilities.formatDate(now, "GMT+8", "HH:mm"), file.getUrl(), icon, color ]);
-  } catch (e) { logSystem('ERROR', '檔案存儲失敗', e.toString()); }
-}
+      return (
+        <div className={`w-full max-w-7xl mx-auto px-4 py-2 h-full flex flex-col font-sans transition-colors duration-300 ${isDarkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+          <header className={`sticky top-0 z-40 border-b backdrop-blur-xl transition-colors duration-300 ${isDarkMode ? 'bg-slate-900/80 border-slate-700/50' : 'bg-white/80 border-slate-200/50'}`}>
+            <div className="py-3 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">📋</div>
+                <h1 className="text-lg font-black tracking-tighter hidden sm:block">資訊牆 V12.1</h1>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={handleBackup} disabled={isProcessing} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-black transition-colors disabled:opacity-50">原始碼備份</button>
+                <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-2 rounded-lg text-xs font-bold transition-colors ${isDarkMode ? 'bg-slate-800 text-yellow-400' : 'bg-slate-100 text-slate-600'}`}>
+                  {isDarkMode ? '☀️' : '🌙'}
+                </button>
+                <button onClick={() => { setIsManageMode(!isManageMode); setSelectedIds(new Set()); }} className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${isManageMode ? 'bg-indigo-600 text-white' : (isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600')}`}>
+                  批次管理
+                </button>
+                {profile && <img src={profile.pictureUrl} className="w-8 h-8 rounded-lg object-cover border border-slate-200" alt="" />}
+              </div>
+            </div>
+            
+            <div className="pb-3 flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+              <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1">
+                {['全部', '待辦', '行程', '好文', '檔案'].map(t => (
+                  <button key={t} onClick={() => { setFilter(t); setSubFilter('全部'); setPage(1); }} className={`px-4 py-1.5 rounded-xl text-[11px] font-black whitespace-nowrap transition-all ${filter === t ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-white text-slate-400 border border-slate-200/60')}`}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <form onSubmit={handleSearch} className="flex gap-2">
+                <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜尋關鍵字..." className={`px-3 py-1.5 rounded-lg text-sm focus:outline-none w-full sm:w-48 transition-colors ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-slate-200'}`} />
+                <button type="submit" className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-bold">搜尋</button>
+              </form>
+            </div>
+
+            {filter === '好文' && subcategories.length > 1 && (
+              <div className="pb-3 flex gap-2 overflow-x-auto no-scrollbar">
+                {subcategories.map(sub => (
+                  <button key={sub} onClick={() => setSubFilter(sub)} className={`px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition-all ${subFilter === sub ? 'bg-emerald-500 text-white' : (isDarkMode ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500')}`}>
+                    # {sub}
+                  </button>
+                ))}
+              </div>
+            )}
+            
+            {isManageMode && (
+              <div className={`py-2 border-t flex justify-between items-center ${isDarkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-indigo-50/50'}`}>
+                <span className="text-sm font-bold text-indigo-500">已選擇 {selectedIds.size} 筆</span>
+                <button onClick={handleBatchDelete} disabled={selectedIds.size === 0 || isProcessing} className="px-4 py-1.5 bg-red-500 text-white rounded-lg text-xs font-bold disabled:opacity-50">刪除選取</button>
+              </div>
+            )}
+          </header>
+
+          <main className="py-6 flex-1">
+            {isError && (
+              <div className="w-full bg-red-500/10 border border-red-500 text-red-500 rounded-xl p-4 mb-4 text-center font-bold text-sm">
+                系統發生異常，請確認伺服器連線狀態或重新整理頁面。
+              </div>
+            )}
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+              {filtered.map(item => {
+                const thumb = getThumbnail(item?.url);
+                const isSelected = selectedIds.has(item?.id);
+                const safeContent = DOMPurify.sanitize(item?.content ?? '');
+                
+                return (
+                  <div key={item?.id} onClick={() => isManageMode && toggleSelection(item.id)} className={`group rounded-2xl border shadow-sm transition-all overflow-hidden flex flex-col relative ${isManageMode ? 'cursor-pointer' : ''} ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} ${isSelected ? 'ring-2 ring-indigo-500' : ''}`}>
+                    
+                    {!isManageMode && (
+                      <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => setEditingItem(item)} className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs shadow">✏️</button>
+                        <button onClick={() => setConfirmDelete({id: item.id, url: item.url})} className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow">✕</button>
+                      </div>
+                    )}
+                    
+                    {item?.type === 'file' && thumb && (
+                      <div onClick={(e) => { if (!isManageMode) window.open(item.url); e.stopPropagation(); }} className="w-full h-32 overflow-hidden cursor-pointer">
+                        <img src={thumb} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt="" />
+                      </div>
+                    )}
+
+                    <div className="p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className={`px-2 py-1 rounded text-[10px] font-black uppercase ${item?.color || 'bg-slate-100 text-slate-600'} ${isDarkMode && item?.color?.includes('slate') ? 'bg-slate-700 text-slate-300' : ''}`}>
+                          {item?.icon} {item?.type?.toUpperCase()}
+                        </div>
+                        {item?.type === 'article' && item?.subcategory && (
+                           <span className="px-2 py-1 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400">
+                             {item.subcategory}
+                           </span>
+                        )}
+                        <span className="text-[10px] font-bold text-slate-400 ml-auto">{item?.date} {item?.time}</span>
+                      </div>
+
+                      <h2 onClick={(e) => { if (!isManageMode && item?.type !== 'todo' && item?.url) window.open(item.url); e.stopPropagation(); }} className={`text-base font-black leading-tight mb-2 ${isDarkMode ? 'text-slate-100' : 'text-slate-800'} ${item?.type !== 'todo' && !isManageMode ? 'cursor-pointer hover:text-indigo-500' : ''}`}>
+                        {item?.title ?? '無標題'}
+                      </h2>
+                      
+                      <div className={`rounded-xl p-3 text-xs font-medium leading-relaxed max-h-[120px] overflow-y-auto whitespace-pre-wrap ${isDarkMode ? 'bg-slate-900/50 text-slate-300' : 'bg-slate-50 text-slate-600'}`} dangerouslySetInnerHTML={{ __html: safeContent }} />
+                      
+                      {item?.type === 'event' && (
+                        <a href={generateCalendarUrl(item?.title, item?.content)} target="_blank" rel="noreferrer" className={`mt-4 flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isDarkMode ? 'bg-blue-900/50 hover:bg-blue-800/50 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'}`}>
+                          📅 加入 Google 行事曆
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {isLoading && !isError && <div className="py-10 text-center text-indigo-400 font-bold animate-pulse text-sm">數據同步中...</div>}
+          </main>
+
+          {editingItem && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+              <div className={`rounded-[2rem] p-6 w-full max-w-md shadow-2xl ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+                <h3 className="text-lg font-black mb-4">編輯紀錄</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">分類</label>
+                    <select value={editingItem.type} onChange={e => setEditingItem({...editingItem, type: e.target.value})} className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`}>
+                      <option value="article">好文</option><option value="todo">待辦</option>
+                      <option value="event">行程</option><option value="file">檔案</option>
+                    </select>
+                  </div>
+                  {editingItem.type === 'article' && (
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 mb-1 block">次分類標籤</label>
+                      <input type="text" value={editingItem.subcategory || ''} onChange={e => setEditingItem({...editingItem, subcategory: e.target.value})} placeholder="例如：科技、設計" className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">標題</label>
+                    <input type="text" value={editingItem.title} onChange={e => setEditingItem({...editingItem, title: e.target.value})} className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">內容</label>
+                    <textarea rows={5} value={editingItem.content} onChange={e => setEditingItem({...editingItem, content: e.target.value})} className={`w-full p-2 rounded-xl text-sm outline-none border resize-none ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-6">
+                  <button onClick={() => setEditingItem(null)} className={`flex-1 py-2.5 rounded-xl font-black text-sm ${isDarkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200'}`}>取消</button>
+                  <button onClick={saveEdit} disabled={isProcessing} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm shadow-lg active:scale-95 transition-all">儲存變更</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {confirmDelete && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-sm">
+              <div className={`rounded-[2rem] p-8 max-w-sm w-full shadow-2xl ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>
+                <h3 className={`text-xl font-black mb-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>確認刪除？</h3>
+                <p className="text-sm text-slate-500 font-medium mb-8">刪除後無法還原。</p>
+                <div className="flex gap-3">
+                  <button onClick={() => setConfirmDelete(null)} className={`flex-1 py-3 rounded-2xl font-black text-sm ${isDarkMode ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>取消</button>
+                  <button onClick={executeDelete} disabled={isProcessing} className="flex-1 py-3 rounded-2xl bg-red-600 text-white font-black text-sm shadow-lg active:scale-95">確定刪除</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {message && <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[70] bg-indigo-600 text-white px-6 py-3 rounded-full text-sm font-black shadow-xl animate-bounce">{message}</div>}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html> */
+  </script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useMemo } = React;
+
+    function App() {
+      const [items, setItems] = useState([]);
+      const [filter, setFilter] = useState('全部');
+      const [subFilter, setSubFilter] = useState('全部');
+      const [profile, setProfile] = useState(null);
+      const [isLoading, setIsLoading] = useState(true);
+      const [keyword, setKeyword] = useState('');
+      const [page, setPage] = useState(1);
+      const [hasMore, setHasMore] = useState(true);
+      const [isDarkMode, setIsDarkMode] = useState(true);
+      const [isManageMode, setIsManageMode] = useState(false);
+      const [selectedIds, setSelectedIds] = useState(new Set());
+      const [editingItem, setEditingItem] = useState(null);
+      const [confirmDelete, setConfirmDelete] = useState(null);
+      const [message, setMessage] = useState(null);
+      const [isProcessing, setIsProcessing] = useState(false);
+      const [isError, setIsError] = useState(false);
+
+      const GAS_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
+      const LIFF_ID = '2009406684-H9fk9ysT';
+
+      const showMessage = (msg) => {
+        setMessage(msg);
+        setTimeout(() => setMessage(null), 3000);
+      };
+
+      const fetchData = useCallback(async (searchKw = '', pageNum = 1) => {
+        setIsLoading(true);
+        setIsError(false);
+        try {
+          let url = `${GAS_URL}?limit=20&page=${pageNum}`;
+          if (searchKw) url += `&keyword=${encodeURIComponent(searchKw)}`;
+          
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+          
+          const res = await fetch(url, { redirect: 'follow', signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            if (pageNum === 1) {
+              setItems(data);
+              localStorage.setItem('infoWallCache', JSON.stringify(data));
+            } else {
+              setItems(prev => {
+                const newData = [...prev, ...data];
+                localStorage.setItem('infoWallCache', JSON.stringify(newData));
+                return newData;
+              });
+            }
+            setHasMore(data.length === 20);
+          }
+        } catch (e) {
+          console.error(e);
+          setIsError(true);
+          showMessage("資料讀取失敗，請檢查網路狀態");
+        } finally {
+          setIsLoading(false);
+        }
+      }, [GAS_URL]);
+
+      useEffect(() => {
+        const init = async () => {
+          document.getElementById('initial-loader').style.opacity = '0';
+          setTimeout(() => document.getElementById('initial-loader').style.display = 'none', 500);
+
+          const cached = localStorage.getItem('infoWallCache');
+          if (cached) {
+            try {
+              setItems(JSON.parse(cached));
+              setIsLoading(false);
+            } catch (e) { localStorage.removeItem('infoWallCache'); }
+          }
+
+          if (window.liff) {
+            try {
+              await window.liff.init({ liffId: LIFF_ID });
+              if (window.liff.isLoggedIn()) setProfile(await window.liff.getProfile());
+            } catch (e) { console.error(e); }
+          }
+          fetchData('', 1);
+        };
+        init();
+      }, [fetchData]);
+
+      useEffect(() => {
+        if (page > 1) fetchData(keyword, page);
+      }, [page, keyword, fetchData]);
+
+      useEffect(() => {
+        const handleScroll = () => {
+          if (window.innerHeight + document.documentElement.scrollTop >= document.documentElement.offsetHeight - 100) {
+            if (!isLoading && hasMore) setPage(p => p + 1);
+          }
+        };
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+      }, [isLoading, hasMore]);
+
+      const toggleSelection = (id) => {
+        const newSet = new Set(selectedIds);
+        if (newSet.has(id)) newSet.delete(id);
+        else newSet.add(id);
+        setSelectedIds(newSet);
+      };
+
+      const handleBatchDelete = async () => {
+        if (selectedIds.size === 0) return;
+        setIsProcessing(true);
+        try {
+          const idsArray = Array.from(selectedIds);
+          const target = `${GAS_URL}?action=deleteBatch&ids=${encodeURIComponent(JSON.stringify(idsArray))}`;
+          const res = await fetch(target, { redirect: 'follow' });
+          const result = await res.json();
+          if (result?.success) {
+            setItems(prev => {
+              const newData = prev.filter(i => !selectedIds.has(i.id));
+              localStorage.setItem('infoWallCache', JSON.stringify(newData));
+              return newData;
+            });
+            showMessage(`已刪除 ${selectedIds.size} 筆資料`);
+            setSelectedIds(new Set());
+            setIsManageMode(false);
+          } else { showMessage("批次刪除失敗"); }
+        } catch (e) { showMessage("網路連線錯誤"); }
+        setIsProcessing(false);
+      };
+
+      const executeDelete = async () => {
+        if (!confirmDelete) return;
+        setIsProcessing(true);
+        try {
+          const target = `${GAS_URL}?action=delete&id=${confirmDelete.id}&url=${encodeURIComponent(confirmDelete.url)}`;
+          const res = await fetch(target, { redirect: 'follow' });
+          const result = await res.json();
+          if (result?.success) {
+            setItems(prev => {
+              const newData = prev.filter(i => i.id !== confirmDelete.id);
+              localStorage.setItem('infoWallCache', JSON.stringify(newData));
+              return newData;
+            });
+            showMessage("刪除成功");
+          } else { showMessage("刪除失敗"); }
+        } catch (e) { showMessage("網路連線錯誤"); }
+        setIsProcessing(false);
+        setConfirmDelete(null);
+      };
+
+      const saveEdit = async () => {
+        if (!editingItem) return;
+        setIsProcessing(true);
+        try {
+          const params = new URLSearchParams();
+          params.append('action', 'updateFull');
+          params.append('id', editingItem.id);
+          params.append('title', encodeURIComponent(editingItem.title));
+          params.append('content', encodeURIComponent(editingItem.content));
+          params.append('type', editingItem.type);
+          params.append('subcategory', encodeURIComponent(editingItem.subcategory || ''));
+
+          const res = await fetch(`${GAS_URL}?${params.toString()}`, { redirect: 'follow', method: 'POST' });
+          const result = await res.json();
+          if (result?.success) {
+            setItems(prev => {
+              const newData = prev.map(i => i.id === editingItem.id ? editingItem : i);
+              localStorage.setItem('infoWallCache', JSON.stringify(newData));
+              return newData;
+            });
+            showMessage("更新成功");
+          } else { showMessage("更新失敗"); }
+        } catch (e) { showMessage("網路錯誤"); }
+        setIsProcessing(false);
+        setEditingItem(null);
+      };
+
+      const handleBackup = async () => {
+        const sourceCode = document.getElementById('appSource')?.textContent?.trim();
+        if (!sourceCode) return showMessage("備份失敗：未找到 appSource 區塊");
+        setIsProcessing(true);
+        try {
+          const res = await fetch(GAS_URL, {
+            redirect: 'follow',
+            method: 'POST',
+            body: JSON.stringify({ action: 'backup', sourceCode })
+          });
+          const result = await res.json();
+          if (result?.success) showMessage("原始碼備份成功");
+          else showMessage("備份寫入失敗");
+        } catch (e) { showMessage("備份連線錯誤"); }
+        setIsProcessing(false);
+      };
+
+      const handleSearch = (e) => {
+        e.preventDefault();
+        setPage(1);
+        fetchData(keyword, 1);
+      };
+
+      const getThumbnail = (url) => {
+        if (!url || !url.includes('drive.google.com')) return null;
+        const match = url.match(/\/d\/(.+?)\//) || url.match(/id=(.+?)(&|$)/);
+        return match ? `https://drive.google.com/thumbnail?id=${match[1]}&sz=w400` : null;
+      };
+
+      const generateCalendarUrl = (title, details) => {
+        const url = new URL('https://calendar.google.com/calendar/render');
+        url.searchParams.append('action', 'TEMPLATE');
+        url.searchParams.append('text', title || '');
+        url.searchParams.append('details', details || '');
+        return url.toString();
+      };
+
+      const filterMap = { '全部': 'all', '待辦': 'todo', '行程': 'event', '好文': 'article', '檔案': 'file' };
+      
+      const subcategories = useMemo(() => {
+        const subs = items.filter(i => i.type === 'article').map(i => i.subcategory || '未分類');
+        return ['全部', ...new Set(subs)];
+      }, [items]);
+
+      const filtered = useMemo(() => {
+        return items.filter(i => {
+          const typeMatch = filter === '全部' ? true : i.type === filterMap[filter];
+          const subMatch = (filter === '好文' && subFilter !== '全部') ? (i.subcategory === subFilter || (!i.subcategory && subFilter === '未分類')) : true;
+          return typeMatch && subMatch;
+        });
+      }, [items, filter, subFilter]);
+
+      return (
+        <div className={`w-full max-w-7xl mx-auto px-4 py-2 h-full flex flex-col font-sans transition-colors duration-300 ${isDarkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+          <header className={`sticky top-0 z-40 border-b backdrop-blur-xl transition-colors duration-300 ${isDarkMode ? 'bg-slate-900/80 border-slate-700/50' : 'bg-white/80 border-slate-200/50'}`}>
+            <div className="py-3 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">📋</div>
+                <h1 className="text-lg font-black tracking-tighter hidden sm:block">資訊牆 V12.1</h1>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={handleBackup} disabled={isProcessing} className="px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-black transition-colors disabled:opacity-50">原始碼備份</button>
+                <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-2 rounded-lg text-xs font-bold transition-colors ${isDarkMode ? 'bg-slate-800 text-yellow-400' : 'bg-slate-100 text-slate-600'}`}>
+                  {isDarkMode ? '☀️' : '🌙'}
+                </button>
+                <button onClick={() => { setIsManageMode(!isManageMode); setSelectedIds(new Set()); }} className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${isManageMode ? 'bg-indigo-600 text-white' : (isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600')}`}>
+                  批次管理
+                </button>
+                {profile && <img src={profile.pictureUrl} className="w-8 h-8 rounded-lg object-cover border border-slate-200" alt="" />}
+              </div>
+            </div>
+            
+            <div className="pb-3 flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+              <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1">
+                {['全部', '待辦', '行程', '好文', '檔案'].map(t => (
+                  <button key={t} onClick={() => { setFilter(t); setSubFilter('全部'); setPage(1); }} className={`px-4 py-1.5 rounded-xl text-[11px] font-black whitespace-nowrap transition-all ${filter === t ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-white text-slate-400 border border-slate-200/60')}`}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <form onSubmit={handleSearch} className="flex gap-2">
+                <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜尋關鍵字..." className={`px-3 py-1.5 rounded-lg text-sm focus:outline-none w-full sm:w-48 transition-colors ${isDarkMode ? 'bg-slate-800 text-white border-slate-700' : 'bg-white border-slate-200'}`} />
+                <button type="submit" className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-bold">搜尋</button>
+              </form>
+            </div>
+
+            {filter === '好文' && subcategories.length > 1 && (
+              <div className="pb-3 flex gap-2 overflow-x-auto no-scrollbar">
+                {subcategories.map(sub => (
+                  <button key={sub} onClick={() => setSubFilter(sub)} className={`px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition-all ${subFilter === sub ? 'bg-emerald-500 text-white' : (isDarkMode ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500')}`}>
+                    # {sub}
+                  </button>
+                ))}
+              </div>
+            )}
+            
+            {isManageMode && (
+              <div className={`py-2 border-t flex justify-between items-center ${isDarkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-indigo-50/50'}`}>
+                <span className="text-sm font-bold text-indigo-500">已選擇 {selectedIds.size} 筆</span>
+                <button onClick={handleBatchDelete} disabled={selectedIds.size === 0 || isProcessing} className="px-4 py-1.5 bg-red-500 text-white rounded-lg text-xs font-bold disabled:opacity-50">刪除選取</button>
+              </div>
+            )}
+          </header>
+
+          <main className="py-6 flex-1">
+            {isError && (
+              <div className="w-full bg-red-500/10 border border-red-500 text-red-500 rounded-xl p-4 mb-4 text-center font-bold text-sm">
+                系統發生異常，請確認伺服器連線狀態或重新整理頁面。
+              </div>
+            )}
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+              {filtered.map(item => {
+                const thumb = getThumbnail(item?.url);
+                const isSelected = selectedIds.has(item?.id);
+                const safeContent = DOMPurify.sanitize(item?.content ?? '');
+                
+                return (
+                  <div key={item?.id} onClick={() => isManageMode && toggleSelection(item.id)} className={`group rounded-2xl border shadow-sm transition-all overflow-hidden flex flex-col relative ${isManageMode ? 'cursor-pointer' : ''} ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} ${isSelected ? 'ring-2 ring-indigo-500' : ''}`}>
+                    
+                    {!isManageMode && (
+                      <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => setEditingItem(item)} className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs shadow">✏️</button>
+                        <button onClick={() => setConfirmDelete({id: item.id, url: item.url})} className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow">✕</button>
+                      </div>
+                    )}
+                    
+                    {item?.type === 'file' && thumb && (
+                      <div onClick={(e) => { if (!isManageMode) window.open(item.url); e.stopPropagation(); }} className="w-full h-32 overflow-hidden cursor-pointer">
+                        <img src={thumb} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt="" />
+                      </div>
+                    )}
+
+                    <div className="p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className={`px-2 py-1 rounded text-[10px] font-black uppercase ${item?.color || 'bg-slate-100 text-slate-600'} ${isDarkMode && item?.color?.includes('slate') ? 'bg-slate-700 text-slate-300' : ''}`}>
+                          {item?.icon} {item?.type?.toUpperCase()}
+                        </div>
+                        {item?.type === 'article' && item?.subcategory && (
+                           <span className="px-2 py-1 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400">
+                             {item.subcategory}
+                           </span>
+                        )}
+                        <span className="text-[10px] font-bold text-slate-400 ml-auto">{item?.date} {item?.time}</span>
+                      </div>
+
+                      <h2 onClick={(e) => { if (!isManageMode && item?.type !== 'todo' && item?.url) window.open(item.url); e.stopPropagation(); }} className={`text-base font-black leading-tight mb-2 ${isDarkMode ? 'text-slate-100' : 'text-slate-800'} ${item?.type !== 'todo' && !isManageMode ? 'cursor-pointer hover:text-indigo-500' : ''}`}>
+                        {item?.title ?? '無標題'}
+                      </h2>
+                      
+                      <div className={`rounded-xl p-3 text-xs font-medium leading-relaxed max-h-[120px] overflow-y-auto whitespace-pre-wrap ${isDarkMode ? 'bg-slate-900/50 text-slate-300' : 'bg-slate-50 text-slate-600'}`} dangerouslySetInnerHTML={{ __html: safeContent }} />
+                      
+                      {item?.type === 'event' && (
+                        <a href={generateCalendarUrl(item?.title, item?.content)} target="_blank" rel="noreferrer" className={`mt-4 flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isDarkMode ? 'bg-blue-900/50 hover:bg-blue-800/50 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'}`}>
+                          📅 加入 Google 行事曆
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {isLoading && !isError && <div className="py-10 text-center text-indigo-400 font-bold animate-pulse text-sm">數據同步中...</div>}
+          </main>
+
+          {editingItem && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+              <div className={`rounded-[2rem] p-6 w-full max-w-md shadow-2xl ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+                <h3 className="text-lg font-black mb-4">編輯紀錄</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">分類</label>
+                    <select value={editingItem.type} onChange={e => setEditingItem({...editingItem, type: e.target.value})} className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`}>
+                      <option value="article">好文</option><option value="todo">待辦</option>
+                      <option value="event">行程</option><option value="file">檔案</option>
+                    </select>
+                  </div>
+                  {editingItem.type === 'article' && (
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 mb-1 block">次分類標籤</label>
+                      <input type="text" value={editingItem.subcategory || ''} onChange={e => setEditingItem({...editingItem, subcategory: e.target.value})} placeholder="例如：科技、設計" className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">標題</label>
+                    <input type="text" value={editingItem.title} onChange={e => setEditingItem({...editingItem, title: e.target.value})} className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">內容</label>
+                    <textarea rows={5} value={editingItem.content} onChange={e => setEditingItem({...editingItem, content: e.target.value})} className={`w-full p-2 rounded-xl text-sm outline-none border resize-none ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-6">
+                  <button onClick={() => setEditingItem(null)} className={`flex-1 py-2.5 rounded-xl font-black text-sm ${isDarkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200'}`}>取消</button>
+                  <button onClick={saveEdit} disabled={isProcessing} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm shadow-lg active:scale-95 transition-all">儲存變更</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {confirmDelete && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-sm">
+              <div className={`rounded-[2rem] p-8 max-w-sm w-full shadow-2xl ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>
+                <h3 className={`text-xl font-black mb-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>確認刪除？</h3>
+                <p className="text-sm text-slate-500 font-medium mb-8">刪除後無法還原。</p>
+                <div className="flex gap-3">
+                  <button onClick={() => setConfirmDelete(null)} className={`flex-1 py-3 rounded-2xl font-black text-sm ${isDarkMode ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>取消</button>
+                  <button onClick={executeDelete} disabled={isProcessing} className="flex-1 py-3 rounded-2xl bg-red-600 text-white font-black text-sm shadow-lg active:scale-95">確定刪除</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {message && <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[70] bg-indigo-600 text-white px-6 py-3 rounded-full text-sm font-black shadow-xl animate-bounce">{message}</div>}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
