@@ -286,9 +286,9 @@
                   <div key={item?.id} onClick={() => isManageMode && toggleSelection(item.id)} className={`group rounded-2xl border shadow-sm transition-all overflow-hidden flex flex-col relative ${isManageMode ? 'cursor-pointer' : ''} ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} ${isSelected ? 'ring-2 ring-indigo-500' : ''}`}>
                     
                     {!isManageMode && (
-                      <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                        <button onClick={(e) => { e.stopPropagation(); setEditingItem(item); }} className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs shadow">✏️</button>
-                        <button onClick={(e) => { e.stopPropagation(); setConfirmDelete({id: item.id, url: item.url}); }} className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow">✕</button>
+                      <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingItem({...item}); }} className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs shadow active:scale-95 cursor-pointer">✏️</button>
+                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmDelete({id: item.id, url: item.url}); }} className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow active:scale-95 cursor-pointer">✕</button>
                       </div>
                     )}
                     
@@ -349,7 +349,7 @@
           <button onClick={() => setIsAskAiOpen(!isAskAiOpen)} className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 rounded-full shadow-2xl flex items-center justify-center text-white text-2xl hover:scale-110 transition-transform">✨</button>
           
           {isAskAiOpen && (
-            <div className={`fixed bottom-24 right-6 z-50 w-[calc(100%-3rem)] sm:w-96 rounded-3xl shadow-2xl border flex flex-col overflow-hidden transition-colors ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className={`fixed bottom-24 right-6 z-[9999] w-[calc(100%-3rem)] sm:w-96 rounded-3xl shadow-2xl border flex flex-col overflow-hidden transition-colors ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
               <div className="p-4 bg-indigo-600 text-white font-black flex justify-between items-center">
                 <span>知識庫專屬助理</span>
                 <button onClick={() => setIsAskAiOpen(false)} className="opacity-70 hover:opacity-100 text-lg">✕</button>
@@ -362,6 +362,54 @@
               <div className="p-3 border-t dark:border-slate-700 flex gap-2">
                 <input type="text" value={askAiQuery} onChange={(e) => setAskAiQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAskAI()} placeholder="詢問當前分類的資料..." className={`flex-1 px-3 py-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
                 <button onClick={handleAskAI} disabled={isAskAiLoading || !askAiQuery.trim()} className="bg-indigo-600 text-white px-4 rounded-xl text-sm font-bold disabled:opacity-50 hover:bg-indigo-700 transition-colors">送出</button>
+              </div>
+            </div>
+          )}
+
+          {editingItem && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+              <div className={`rounded-[2rem] p-6 w-full max-w-md shadow-2xl ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+                <h3 className="text-lg font-black mb-4">編輯紀錄</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">分類</label>
+                    <select value={editingItem.type || 'article'} onChange={e => setEditingItem({...editingItem, type: e.target.value})} className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`}>
+                      <option value="article">好文</option><option value="todo">待辦</option>
+                      <option value="event">行程</option><option value="file">檔案</option>
+                    </select>
+                  </div>
+                  {editingItem.type === 'article' && (
+                    <div>
+                      <label className="text-xs font-bold text-slate-500 mb-1 block">次分類標籤</label>
+                      <input type="text" value={editingItem.subcategory || ''} onChange={e => setEditingItem({...editingItem, subcategory: e.target.value})} placeholder="例如：科技、設計" className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">標題</label>
+                    <input type="text" value={editingItem.title || ''} onChange={e => setEditingItem({...editingItem, title: e.target.value})} className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 mb-1 block">內容</label>
+                    <textarea rows={5} value={editingItem.content || ''} onChange={e => setEditingItem({...editingItem, content: e.target.value})} className={`w-full p-2 rounded-xl text-sm outline-none border resize-none ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-6">
+                  <button onClick={() => setEditingItem(null)} className={`flex-1 py-2.5 rounded-xl font-black text-sm ${isDarkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200'}`}>取消</button>
+                  <button onClick={saveEdit} disabled={isProcessing} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm shadow-lg active:scale-95 transition-all">儲存變更</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {confirmDelete && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-sm">
+              <div className={`rounded-[2rem] p-8 max-w-sm w-full shadow-2xl ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>
+                <h3 className={`text-xl font-black mb-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>確認刪除？</h3>
+                <p className="text-sm text-slate-500 font-medium mb-8">刪除後無法還原。</p>
+                <div className="flex gap-3">
+                  <button onClick={() => setConfirmDelete(null)} className={`flex-1 py-3 rounded-2xl font-black text-sm ${isDarkMode ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}>取消</button>
+                  <button onClick={executeDelete} disabled={isProcessing} className="flex-1 py-3 rounded-2xl bg-red-600 text-white font-black text-sm shadow-lg active:scale-95">確定刪除</button>
+                </div>
               </div>
             </div>
           )}
