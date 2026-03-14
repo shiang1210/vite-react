@@ -154,8 +154,8 @@
           const payload = {
             action: 'updateFull',
             id: editingItem.id,
-            title: encodeURIComponent(editingItem.title),
-            content: encodeURIComponent(editingItem.content),
+            title: encodeURIComponent(editingItem.title || ''),
+            content: encodeURIComponent(editingItem.content || ''),
             type: editingItem.type,
             subcategory: encodeURIComponent(editingItem.subcategory || '')
           };
@@ -286,9 +286,9 @@
                   <div key={item?.id} onClick={() => isManageMode && toggleSelection(item.id)} className={`group rounded-2xl border shadow-sm transition-all overflow-hidden flex flex-col relative ${isManageMode ? 'cursor-pointer' : ''} ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} ${isSelected ? 'ring-2 ring-indigo-500' : ''}`}>
                     
                     {!isManageMode && (
-                      <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => setEditingItem(item)} className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs shadow">✏️</button>
-                        <button onClick={() => setConfirmDelete({id: item.id, url: item.url})} className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow">✕</button>
+                      <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                        <button onClick={(e) => { e.stopPropagation(); setEditingItem(item); }} className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs shadow">✏️</button>
+                        <button onClick={(e) => { e.stopPropagation(); setConfirmDelete({id: item.id, url: item.url}); }} className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow">✕</button>
                       </div>
                     )}
                     
