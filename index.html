@@ -81,11 +81,7 @@
         const link = document.createElement('link');
         link.rel = 'manifest'; link.href = manifestUrl; document.head.appendChild(link);
 
-        if ('serviceWorker' in navigator) {
-          const swCode = `self.addEventListener('install', e => self.skipWaiting()); self.addEventListener('activate', e => e.waitUntil(self.clients.claim())); self.addEventListener('fetch', e => {});`;
-          const swBlob = new Blob([swCode], { type: 'text/javascript' });
-          try { navigator.serviceWorker.register(URL.createObjectURL(swBlob)); } catch(e) {}
-        }
+        // 已移除不相容的 blob: Service Worker 註冊代碼
 
         const handleBeforeInstallPrompt = (e) => { e.preventDefault(); setPwaPrompt(e); };
         window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
