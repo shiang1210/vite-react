@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📋</text></svg>">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>智能資訊牆 V12.3</title>
+  <title>智能資訊牆 V12.4</title>
   
   <style>
     body { margin: 0; padding: 0; min-height: 100vh; overflow-x: hidden; }
@@ -41,7 +41,6 @@
   <script type="text/babel">
     const { useState, useEffect, useCallback, useMemo, useRef } = React;
 
-    // 【新增】Lazy Loading 圖片元件 (Intersection Observer)
     const LazyImage = ({ src, alt, className }) => {
       const [isLoaded, setIsLoaded] = useState(false);
       const imgRef = useRef();
@@ -75,7 +74,6 @@
       const [endDate, setEndDate] = useState('');
       const [showAdvanced, setShowAdvanced] = useState(false);
       
-      // 【修改】傳統分頁狀態管理
       const [currentPage, setCurrentPage] = useState(1);
       const ITEMS_PER_PAGE = 20;
 
@@ -95,7 +93,7 @@
       const [isAskAiLoading, setIsAskAiLoading] = useState(false);
 
       const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
-      const [tagMergeSource, setTagMergeSource] = useState('');
+      const [tagMergeSources, setTagMergeSources] = useState([]);
       const [tagMergeTarget, setTagMergeTarget] = useState('');
 
       const GAS_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
@@ -126,7 +124,6 @@
         if (outcome === 'accepted') setPwaPrompt(null);
       };
 
-      // 【修改】一次性抓取所有資料供前端精準搜尋與分頁
       const fetchData = useCallback(async () => {
         setIsLoading(true); setIsError(false);
         try {
@@ -158,7 +155,6 @@
         init();
       }, [fetchData]);
 
-      // 【新增】LIFF 深度整合開啟連結
       const handleOpenUrl = (e, url) => {
         e.stopPropagation();
         if (!url || url === '#') return;
@@ -247,12 +243,12 @@
       };
 
       const handleMergeTags = async () => {
-        if (!tagMergeSource || !tagMergeTarget || tagMergeSource === tagMergeTarget) return;
+        if (tagMergeSources.length === 0 || !tagMergeTarget || tagMergeSources.includes(tagMergeTarget)) return;
         setIsProcessing(true);
         try {
           const payload = {
             action: 'mergeTags',
-            oldTag: tagMergeSource,
+            oldTags: tagMergeSources,
             newTag: tagMergeTarget
           };
           const res = await fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify(payload) });
@@ -261,15 +257,22 @@
             setItems(prev => prev.map(item => {
               if (item.type !== 'article' || !item.subcategory) return item;
               const tags = item.subcategory.split(/[,、]/).map(s=>s.trim());
-              if (tags.includes(tagMergeSource)) {
-                const newTags = tags.map(t => t === tagMergeSource ? tagMergeTarget : t);
+              let hasChanges = false;
+              const newTags = tags.map(t => {
+                if (tagMergeSources.includes(t)) {
+                  hasChanges = true;
+                  return tagMergeTarget;
+                }
+                return t;
+              });
+              if (hasChanges) {
                 return { ...item, subcategory: [...new Set(newTags)].join(', ') };
               }
               return item;
             }));
-            showMessage(`已將「${tagMergeSource}」合併為「${tagMergeTarget}」並寫入系統記憶`);
+            showMessage(`已將 ${tagMergeSources.length} 個標籤合併為「${tagMergeTarget}」並寫入記憶`);
             setIsTagManagerOpen(false);
-            setTagMergeSource('');
+            setTagMergeSources([]);
             setTagMergeTarget('');
           } else { showMessage("合併失敗"); }
         } catch (e) { showMessage("網路連線錯誤"); }
@@ -344,7 +347,6 @@
         return ['全部', ...new Set(allTags.length ? allTags : ['未分類'])]; 
       }, [items]);
       
-      // 【修改】加入檢索權重排序演算法
       const filteredAndSorted = useMemo(() => { 
         if (!Array.isArray(items)) return []; 
         let result = items.filter(i => { 
@@ -384,7 +386,6 @@
         return result;
       }, [items, filter, subFilter, keyword, startDate, endDate]);
 
-      // 【新增】分頁計算邏輯
       const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / ITEMS_PER_PAGE));
       const currentItems = filteredAndSorted.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
@@ -551,7 +552,6 @@
               })}
             </div>
             
-            {/* 【新增】底部數字分頁元件 */}
             {!isLoading && totalPages > 1 && (
               <div className="flex justify-center items-center gap-4 mt-8 pb-8">
                 <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-indigo-500 hover:text-white'} ${isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600 shadow-sm border border-slate-200'}`}>上一頁</button>
@@ -563,31 +563,53 @@
             {isLoading && !isError && <div className="py-10 text-center text-indigo-400 font-bold animate-pulse text-sm">數據同步中...</div>}
           </main>
 
-          {/* 標籤管理 Modal */}
           {isTagManagerOpen && (
             <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
-              <div className={`rounded-[2rem] p-6 w-full max-w-md shadow-2xl ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
-                <h3 className="text-lg font-black mb-2">🏷️ 標籤管理與自動記憶</h3>
-                <p className="text-xs text-slate-500 mb-6 font-medium leading-relaxed">將散亂的同義標籤合併，系統將會寫入自動修正字典。未來 AI 分類時，會優先引用標準標籤庫並自動校正同義詞。</p>
-                <div className="space-y-4">
+              <div className={`rounded-[2rem] p-6 w-full max-w-md shadow-2xl flex flex-col max-h-[90vh] ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+                <h3 className="text-lg font-black mb-2 flex-shrink-0">🏷️ 標籤管理與自動記憶</h3>
+                <p className="text-xs text-slate-500 mb-4 font-medium leading-relaxed flex-shrink-0">將散亂的同義標籤合併，系統將會寫入自動修正字典。未來 AI 分類時，會優先引用標準標籤庫並自動校正同義詞。</p>
+                <div className="space-y-4 overflow-y-auto flex-1 pr-2 no-scrollbar">
                   <div>
-                    <label className="text-xs font-bold text-slate-500 mb-1 block">要合併的原始標籤</label>
-                    <select value={tagMergeSource} onChange={e => setTagMergeSource(e.target.value)} className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`}>
-                      <option value="">請選擇欲合併的舊標籤...</option>
-                      {subcategories.filter(t => t !== '全部' && t !== '未分類').map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
+                    <label className="text-xs font-bold text-slate-500 mb-2 block">請點選要合併的原始標籤 (可多選)</label>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {subcategories.filter(t => t !== '全部' && t !== '未分類').map(t => {
+                        const isSelected = tagMergeSources.includes(t);
+                        return (
+                          <button
+                            key={t}
+                            onClick={() => {
+                              if (isSelected) setTagMergeSources(prev => prev.filter(tag => tag !== t));
+                              else setTagMergeSources(prev => [...prev, t]);
+                            }}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${isSelected ? 'bg-indigo-500 text-white shadow-md scale-105' : (isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}`}
+                          >
+                            {t} {isSelected && '✓'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {tagMergeSources.length > 0 && (
+                      <div className={`p-3 rounded-xl text-sm mb-4 animate-fade-in ${isDarkMode ? 'bg-indigo-900/30 border border-indigo-700/50' : 'bg-indigo-50 border border-indigo-200'}`}>
+                        <span className="text-xs font-bold text-indigo-500 block mb-2">已選候選區 ({tagMergeSources.length})：</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {tagMergeSources.map(t => <span key={t} className="px-2 py-1 bg-indigo-500 text-white rounded-lg text-xs font-bold shadow-sm">{t}</span>)}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="text-xs font-bold text-slate-500 mb-1 block">合併為標準標籤 (可自訂新名稱)</label>
-                    <input type="text" list="standard-tags" value={tagMergeTarget} onChange={e => setTagMergeTarget(e.target.value)} placeholder="例如：人工智慧、前端開發" className={`w-full p-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+                    <input type="text" list="standard-tags" value={tagMergeTarget} onChange={e => setTagMergeTarget(e.target.value)} placeholder="例如：人工智慧" className={`w-full p-3 rounded-xl text-sm font-bold outline-none border focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
                     <datalist id="standard-tags">
                       {subcategories.filter(t => t !== '全部' && t !== '未分類').map(t => <option key={t} value={t} />)}
                     </datalist>
                   </div>
                 </div>
-                <div className="flex gap-3 mt-8">
-                  <button onClick={() => {setIsTagManagerOpen(false); setTagMergeSource(''); setTagMergeTarget('');}} className={`flex-1 py-2.5 rounded-xl font-black text-sm ${isDarkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200'}`}>取消</button>
-                  <button onClick={handleMergeTags} disabled={isProcessing || !tagMergeSource || !tagMergeTarget || tagMergeSource === tagMergeTarget} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-black text-sm shadow-lg active:scale-95 transition-all disabled:opacity-50">合併並建立規則</button>
+                <div className="flex gap-3 mt-6 flex-shrink-0 pt-4 border-t border-slate-200 dark:border-slate-700">
+                  <button onClick={() => {setIsTagManagerOpen(false); setTagMergeSources([]); setTagMergeTarget('');}} className={`flex-1 py-3 rounded-xl font-black text-sm transition-colors ${isDarkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>取消</button>
+                  <button onClick={handleMergeTags} disabled={isProcessing || tagMergeSources.length === 0 || !tagMergeTarget || tagMergeSources.includes(tagMergeTarget)} className="flex-[2] py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm shadow-lg active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+                    {isProcessing ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : '合併並建立規則'}
+                  </button>
                 </div>
               </div>
             </div>
