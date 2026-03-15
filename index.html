@@ -185,16 +185,24 @@
       const handleMarkCompleted = async (item, e) => {
         e.preventDefault();
         e.stopPropagation();
-        const newTitle = `[已完成] ${item.title}`;
+        const newTitle = `[已完成] ${item.title || '無標題'}`;
+        let newContent = item.content;
+        
+        if (item.type === 'todo' && newContent) {
+          newContent = newContent.replace(/- \[ \]/g, '- [x]');
+        }
         
         setItems(prev => {
-          const newData = prev.map(i => i.id === item.id ? { ...i, title: newTitle } : i);
+          const newData = prev.map(i => i.id === item.id ? { ...i, title: newTitle, content: item.type === 'todo' ? newContent : i.content } : i);
           localStorage.setItem('infoWallCache', JSON.stringify(newData));
           return newData;
         });
         
         try {
           const payload = { action: 'updateFull', id: item.id, title: encodeURIComponent(newTitle), type: item.type };
+          if (item.type === 'todo') {
+            payload.content = encodeURIComponent(newContent);
+          }
           await fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify(payload) });
         } catch (err) {}
       };
@@ -348,6 +356,13 @@
                               </div>
                             );
                           })}
+                          {!isCompleted && !isManageMode && (
+                            <div className="mt-4 flex flex-col gap-2">
+                              <button onClick={(e) => handleMarkCompleted(item, e)} className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isDarkMode ? 'bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600'}`}>
+                                ✅ 標示為完成
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ) : ( <div className="rounded-xl p-3 text-xs font-medium leading-relaxed max-h-[120px] overflow-y-auto whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item?.content ?? '') }} /> )}
 
