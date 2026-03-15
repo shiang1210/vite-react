@@ -339,20 +339,16 @@
           return typeMatch && subMatch && dateMatch; 
         }); 
 
-        let gcalFuture = baseFiltered.filter(i => String(i.id).startsWith('gcal-') && (i.date || '') >= todayStr);
-        let others = baseFiltered.filter(i => !(String(i.id).startsWith('gcal-') && (i.date || '') >= todayStr));
+        let upcomingEvents = baseFiltered.filter(i => i.type === 'event' && (i.date || '') >= todayStr);
+        let others = baseFiltered.filter(i => !(i.type === 'event' && (i.date || '') >= todayStr));
 
-        gcalFuture.sort((a, b) => {
+        upcomingEvents.sort((a, b) => {
           const dtA = (a.date || '') + (a.time || '');
           const dtB = (b.date || '') + (b.time || '');
           return dtA.localeCompare(dtB);
         });
 
-        if (filter === '全部' && !keyword) {
-           gcalFuture = gcalFuture.slice(0, 4);
-        }
-
-        let result = [...gcalFuture, ...others];
+        let result = [...upcomingEvents, ...others];
 
         if (keyword) {
           const kw = keyword.toLowerCase();
