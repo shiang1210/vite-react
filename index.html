@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📋</text></svg>">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>智能資訊牆 V12.5</title>
+  <title>智能資訊牆 V12.6</title>
   
   <style>
     body { margin: 0; padding: 0; min-height: 100vh; overflow-x: hidden; }
@@ -99,7 +99,7 @@
       const GAS_URL = 'https://script.google.com/macros/s/AKfycbwOtD3IcS0tzeHMTbvPNk7wZtm6ShTfzkQ7HaqNY_kMMkJEJRW0_ucxmcO3Qoeb1chi/exec'; 
       const LIFF_ID = '2009406684-H9fk9ysT';
 
-      const showMessage = (msg) => { setMessage(msg); setTimeout(() => setMessage(null), 3000); };
+      const showMessage = useCallback((msg) => { setMessage(msg); setTimeout(() => setMessage(null), 3000); }, []);
 
       useEffect(() => {
         const manifest = {
@@ -133,9 +133,7 @@
           clearTimeout(timeoutId);
           const data = await res.json();
           
-          if (data && data.error) {
-            throw new Error(`後端回應: ${data.message}`);
-          }
+          if (data && data.error) throw new Error(`後端回應: ${data.message}`);
           
           if (Array.isArray(data)) {
             setItems(data); 
@@ -143,7 +141,7 @@
           } else throw new Error("API 資料格式異常");
         } catch (e) { setIsError(true); showMessage(e.message || "網路讀取失敗"); } 
         finally { setIsLoading(false); const loader = document.getElementById('initial-loader'); if(loader) loader.style.display = 'none'; }
-      }, []);
+      }, [showMessage]);
 
       useEffect(() => {
         const init = async () => {
@@ -180,7 +178,7 @@
             showMessage(`已刪除 ${selectedIds.size} 筆資料`);
             setSelectedIds(new Set());
             setIsManageMode(false);
-          } else { showMessage("批次刪除失敗"); }
+          } else showMessage("批次刪除失敗");
         } catch (e) { showMessage("網路連線錯誤"); }
         setIsProcessing(false);
       };
@@ -198,7 +196,7 @@
             showMessage(`已成功封存 ${selectedIds.size} 筆資料`);
             setSelectedIds(new Set());
             setIsManageMode(false);
-          } else { showMessage("批次封存失敗"); }
+          } else showMessage("批次封存失敗");
         } catch (e) { showMessage("網路連線錯誤"); }
         setIsProcessing(false);
       };
@@ -213,7 +211,7 @@
           if (result?.success) {
             setItems(prev => prev.filter(i => i.id !== confirmDelete.id));
             showMessage("刪除成功");
-          } else { showMessage("刪除失敗"); }
+          } else showMessage("刪除失敗");
         } catch (e) { showMessage("網路連線錯誤"); }
         setIsProcessing(false);
         setConfirmDelete(null);
@@ -223,20 +221,13 @@
         if (!editingItem) return;
         setIsProcessing(true);
         try {
-          const payload = {
-            action: 'updateFull',
-            id: editingItem.id,
-            title: encodeURIComponent(editingItem.title || ''),
-            content: encodeURIComponent(editingItem.content || ''),
-            type: editingItem.type,
-            subcategory: encodeURIComponent(editingItem.subcategory || '')
-          };
+          const payload = { action: 'updateFull', id: editingItem.id, title: encodeURIComponent(editingItem.title || ''), content: encodeURIComponent(editingItem.content || ''), type: editingItem.type, subcategory: encodeURIComponent(editingItem.subcategory || '') };
           const res = await fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify(payload) });
           const result = await res.json();
           if (result?.success) {
             setItems(prev => prev.map(i => i.id === editingItem.id ? editingItem : i));
             showMessage("更新成功");
-          } else { showMessage("更新失敗"); }
+          } else showMessage("更新失敗");
         } catch (e) { showMessage("網路錯誤"); }
         setIsProcessing(false);
         setEditingItem(null);
@@ -246,11 +237,7 @@
         if (tagMergeSources.length === 0 || !tagMergeTarget || tagMergeSources.includes(tagMergeTarget)) return;
         setIsProcessing(true);
         try {
-          const payload = {
-            action: 'mergeTags',
-            oldTags: tagMergeSources,
-            newTag: tagMergeTarget
-          };
+          const payload = { action: 'mergeTags', oldTags: tagMergeSources, newTag: tagMergeTarget };
           const res = await fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify(payload) });
           const result = await res.json();
           if (result?.success) {
@@ -259,22 +246,15 @@
               const tags = item.subcategory.split(/[,、]/).map(s=>s.trim());
               let hasChanges = false;
               const newTags = tags.map(t => {
-                if (tagMergeSources.includes(t)) {
-                  hasChanges = true;
-                  return tagMergeTarget;
-                }
+                if (tagMergeSources.includes(t)) { hasChanges = true; return tagMergeTarget; }
                 return t;
               });
-              if (hasChanges) {
-                return { ...item, subcategory: [...new Set(newTags)].join(', ') };
-              }
+              if (hasChanges) return { ...item, subcategory: [...new Set(newTags)].join(', ') };
               return item;
             }));
             showMessage(`已將 ${tagMergeSources.length} 個標籤合併為「${tagMergeTarget}」並寫入記憶`);
-            setIsTagManagerOpen(false);
-            setTagMergeSources([]);
-            setTagMergeTarget('');
-          } else { showMessage("合併失敗"); }
+            setIsTagManagerOpen(false); setTagMergeSources([]); setTagMergeTarget('');
+          } else showMessage("合併失敗");
         } catch (e) { showMessage("網路連線錯誤"); }
         setIsProcessing(false);
       };
@@ -293,15 +273,13 @@
         let newTitle = item.title || '無標題';
         let newContent = item.content;
         
-        if (isCompleted) {
-          newTitle = newTitle.replace(/\[已完成\]\s*/g, '');
-        } else {
+        if (isCompleted) newTitle = newTitle.replace(/\[已完成\]\s*/g, '');
+        else {
           newTitle = `[已完成] ${newTitle}`;
           if (item.type === 'todo' && newContent) newContent = newContent.replace(/- \[ \]/g, '- [x]');
         }
         
         setItems(prev => prev.map(i => i.id === item.id ? { ...i, title: newTitle, content: item.type === 'todo' ? newContent : i.content } : i));
-        
         try {
           const payload = { action: 'updateFull', id: item.id, title: encodeURIComponent(newTitle), type: item.type };
           if (item.type === 'todo') payload.content = encodeURIComponent(newContent);
@@ -316,8 +294,7 @@
         try {
           const res = await fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify({ action: 'backup', sourceCode }) });
           const result = await res.json();
-          if (result?.success) showMessage("原始碼備份成功");
-          else showMessage("備份寫入失敗");
+          if (result?.success) showMessage("原始碼備份成功"); else showMessage("備份寫入失敗");
         } catch (e) { showMessage("備份連線錯誤"); }
         setIsProcessing(false);
       };
@@ -353,15 +330,9 @@
           const typeMatch = filter === '全部' ? true : i.type === filterMap[filter]; 
           const tags = getTags(i.subcategory);
           const subMatch = (filter === '好文' && subFilter !== '全部') ? (tags.includes(subFilter) || (tags.length === 0 && subFilter === '未分類')) : true; 
-          
           let dateMatch = true;
-          if (startDate && i.date) {
-             dateMatch = dateMatch && (i.date >= startDate);
-          }
-          if (endDate && i.date) {
-             dateMatch = dateMatch && (i.date <= endDate);
-          }
-          
+          if (startDate && i.date) dateMatch = dateMatch && (i.date >= startDate);
+          if (endDate && i.date) dateMatch = dateMatch && (i.date <= endDate);
           return typeMatch && subMatch && dateMatch; 
         }); 
 
@@ -371,18 +342,11 @@
             let score = 0;
             const title = (i.title || '').toLowerCase();
             const content = (i.content || '').toLowerCase();
-            
-            if (title === kw) score += 100;
-            else if (title.includes(kw)) score += 50;
-            
-            if (content === kw) score += 20;
-            else if (content.includes(kw)) score += 10;
-            
+            if (title === kw) score += 100; else if (title.includes(kw)) score += 50;
+            if (content === kw) score += 20; else if (content.includes(kw)) score += 10;
             return { ...i, _score: score };
-          }).filter(i => i._score > 0)
-            .sort((a, b) => b._score - a._score);
+          }).filter(i => i._score > 0).sort((a, b) => b._score - a._score);
         }
-
         return result;
       }, [items, filter, subFilter, keyword, startDate, endDate]);
 
@@ -403,7 +367,7 @@
             <div className="py-3 flex justify-between items-center flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">📋</div>
-                <h1 className="text-lg font-black tracking-tighter hidden sm:block">資訊牆 V12.5</h1>
+                <h1 className="text-lg font-black tracking-tighter hidden sm:block">資訊牆 V12.6</h1>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 {pwaPrompt && <button onClick={installPWA} className="px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs font-black transition-colors hover:bg-blue-600">📥 安裝桌面版</button>}
@@ -476,10 +440,12 @@
                 const thumb = getThumbnail(item?.url);
                 const isSelected = selectedIds.has(item?.id);
                 const isCompleted = item?.title?.includes('[已完成]');
+                const isGCal = String(item?.id).startsWith('gcal-');
+                
                 return (
                   <div key={item?.id} onClick={() => isManageMode && toggleSelection(item.id)} className={`virtual-card group rounded-2xl border shadow-sm transition-all overflow-hidden flex flex-col relative ${isManageMode ? 'cursor-pointer' : ''} ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} ${isSelected ? 'ring-2 ring-indigo-500' : ''} ${isCompleted ? 'opacity-50 grayscale-[50%]' : ''}`}>
                     
-                    {!isManageMode && (
+                    {!isManageMode && !isGCal && (
                       <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingItem({...item}); }} className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs shadow active:scale-95 cursor-pointer">✏️</button>
                         <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmDelete({id: item.id, url: item.url}); }} className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow active:scale-95 cursor-pointer">✕</button>
@@ -524,7 +490,7 @@
                               </div>
                             );
                           })}
-                          {!isManageMode && (
+                          {!isManageMode && !isGCal && (
                             <div className="mt-4 flex flex-col gap-2">
                               <button onClick={(e) => handleToggleCompleted(item, e)} className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isCompleted ? (isDarkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-600') : (isDarkMode ? 'bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600')}`}>
                                 {isCompleted ? '↺ 取消完成' : '✅ 標示為完成'}
@@ -536,10 +502,10 @@
 
                       {item?.type === 'event' && (
                         <div className="mt-4 flex flex-col gap-2">
-                          <a href={generateCalendarUrl(item?.title, item?.content)} target="_blank" rel="noreferrer" className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isDarkMode ? 'bg-blue-900/50 hover:bg-blue-800/50 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'}`}>
-                            📅 加入 Google 行事曆
+                          <a href={item?.url && item.url !== '#' ? item.url : generateCalendarUrl(item?.title, item?.content)} target="_blank" rel="noreferrer" className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isDarkMode ? 'bg-blue-900/50 hover:bg-blue-800/50 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'}`}>
+                            📅 檢視 / 加入 Google 行事曆
                           </a>
-                          {!isManageMode && (
+                          {!isManageMode && !isGCal && (
                             <button onClick={(e) => handleToggleCompleted(item, e)} className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isCompleted ? (isDarkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-600') : (isDarkMode ? 'bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600')}`}>
                               {isCompleted ? '↺ 取消完成' : '✅ 標示為完成'}
                             </button>
