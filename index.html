@@ -326,7 +326,10 @@
       
       const filteredAndSorted = useMemo(() => { 
         if (!Array.isArray(items)) return []; 
-        let result = items.filter(i => { 
+        const d = new Date();
+        const todayStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+        let baseFiltered = items.filter(i => { 
           const typeMatch = filter === '全部' ? true : i.type === filterMap[filter]; 
           const tags = getTags(i.subcategory);
           const subMatch = (filter === '好文' && subFilter !== '全部') ? (tags.includes(subFilter) || (tags.length === 0 && subFilter === '未分類')) : true; 
@@ -335,6 +338,21 @@
           if (endDate && i.date) dateMatch = dateMatch && (i.date <= endDate);
           return typeMatch && subMatch && dateMatch; 
         }); 
+
+        let gcalFuture = baseFiltered.filter(i => String(i.id).startsWith('gcal-') && (i.date || '') >= todayStr);
+        let others = baseFiltered.filter(i => !(String(i.id).startsWith('gcal-') && (i.date || '') >= todayStr));
+
+        gcalFuture.sort((a, b) => {
+          const dtA = (a.date || '') + (a.time || '');
+          const dtB = (b.date || '') + (b.time || '');
+          return dtA.localeCompare(dtB);
+        });
+
+        if (filter === '全部' && !keyword) {
+           gcalFuture = gcalFuture.slice(0, 4);
+        }
+
+        let result = [...gcalFuture, ...others];
 
         if (keyword) {
           const kw = keyword.toLowerCase();
