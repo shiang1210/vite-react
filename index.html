@@ -182,6 +182,23 @@
         fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify({ action: 'updateFull', id, content: encodeURIComponent(newContent) }) });
       };
 
+      const handleMarkCompleted = async (item, e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const newTitle = `[已完成] ${item.title}`;
+        
+        setItems(prev => {
+          const newData = prev.map(i => i.id === item.id ? { ...i, title: newTitle } : i);
+          localStorage.setItem('infoWallCache', JSON.stringify(newData));
+          return newData;
+        });
+        
+        try {
+          const payload = { action: 'updateFull', id: item.id, title: encodeURIComponent(newTitle), type: item.type };
+          await fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify(payload) });
+        } catch (err) {}
+      };
+
       const handleBackup = async () => {
         const sourceCode = document.getElementById('appSource')?.textContent?.trim();
         if (!sourceCode) return showMessage("備份失敗：未找到 appSource 區塊");
@@ -282,8 +299,9 @@
               {filtered.map(item => {
                 const thumb = getThumbnail(item?.url);
                 const isSelected = selectedIds.has(item?.id);
+                const isCompleted = item?.title?.includes('[已完成]');
                 return (
-                  <div key={item?.id} onClick={() => isManageMode && toggleSelection(item.id)} className={`group rounded-2xl border shadow-sm transition-all overflow-hidden flex flex-col relative ${isManageMode ? 'cursor-pointer' : ''} ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} ${isSelected ? 'ring-2 ring-indigo-500' : ''}`}>
+                  <div key={item?.id} onClick={() => isManageMode && toggleSelection(item.id)} className={`group rounded-2xl border shadow-sm transition-all overflow-hidden flex flex-col relative ${isManageMode ? 'cursor-pointer' : ''} ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} ${isSelected ? 'ring-2 ring-indigo-500' : ''} ${isCompleted ? 'opacity-50 grayscale-[50%]' : ''}`}>
                     
                     {!isManageMode && (
                       <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
@@ -334,9 +352,16 @@
                       ) : ( <div className="rounded-xl p-3 text-xs font-medium leading-relaxed max-h-[120px] overflow-y-auto whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item?.content ?? '') }} /> )}
 
                       {item?.type === 'event' && (
-                        <a href={generateCalendarUrl(item?.title, item?.content)} target="_blank" rel="noreferrer" className={`mt-4 flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isDarkMode ? 'bg-blue-900/50 hover:bg-blue-800/50 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'}`}>
-                          📅 加入 Google 行事曆
-                        </a>
+                        <div className="mt-4 flex flex-col gap-2">
+                          <a href={generateCalendarUrl(item?.title, item?.content)} target="_blank" rel="noreferrer" className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isDarkMode ? 'bg-blue-900/50 hover:bg-blue-800/50 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'}`}>
+                            📅 加入 Google 行事曆
+                          </a>
+                          {!isCompleted && !isManageMode && (
+                            <button onClick={(e) => handleMarkCompleted(item, e)} className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isDarkMode ? 'bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600'}`}>
+                              ✅ 標示為完成
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
