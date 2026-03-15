@@ -33,7 +33,7 @@
   <script>
     window.runSystemDiagnostics = function() {
       localStorage.clear();
-      alert("快取已強制清除，系統即將重啟。");
+      alert("本機資料已清除，系統即將重啟。");
       window.location.reload(true);
     };
   </script>
@@ -81,8 +81,6 @@
         const link = document.createElement('link');
         link.rel = 'manifest'; link.href = manifestUrl; document.head.appendChild(link);
 
-        // 已移除不相容的 blob: Service Worker 註冊代碼
-
         const handleBeforeInstallPrompt = (e) => { e.preventDefault(); setPwaPrompt(e); };
         window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
         return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -111,18 +109,16 @@
           }
           
           if (Array.isArray(data)) {
-            if (pageNum === 1) { setItems(data); localStorage.setItem('infoWallCache', JSON.stringify(data)); } 
-            else { setItems(prev => { const newData = [...prev, ...data]; localStorage.setItem('infoWallCache', JSON.stringify(newData)); return newData; }); }
+            if (pageNum === 1) { setItems(data); } 
+            else { setItems(prev => [...prev, ...data]); }
             setHasMore(data.length === 20);
           } else throw new Error("API 資料格式異常");
-        } catch (e) { setIsError(true); showMessage(e.message || "網路或 CORS 讀取失敗"); } 
+        } catch (e) { setIsError(true); showMessage(e.message || "網路讀取失敗"); } 
         finally { setIsLoading(false); const loader = document.getElementById('initial-loader'); if(loader) loader.style.display = 'none'; }
       }, []);
 
       useEffect(() => {
         const init = async () => {
-          const cached = localStorage.getItem('infoWallCache');
-          if (cached) { try { const parsed = JSON.parse(cached); if (Array.isArray(parsed)) { setItems(parsed); setIsLoading(false); const loader = document.getElementById('initial-loader'); if(loader) loader.style.display = 'none'; } } catch (e) {} }
           if (window.liff) { try { await window.liff.init({ liffId: LIFF_ID }); if (window.liff.isLoggedIn()) setProfile(await window.liff.getProfile()); } catch (e) {} }
           fetchData('', 1);
         };
@@ -146,11 +142,7 @@
           const res = await fetch(target, { redirect: 'follow' });
           const result = await res.json();
           if (result?.success) {
-            setItems(prev => {
-              const newData = prev.filter(i => !selectedIds.has(i.id));
-              localStorage.setItem('infoWallCache', JSON.stringify(newData));
-              return newData;
-            });
+            setItems(prev => prev.filter(i => !selectedIds.has(i.id)));
             showMessage(`已刪除 ${selectedIds.size} 筆資料`);
             setSelectedIds(new Set());
             setIsManageMode(false);
@@ -167,11 +159,7 @@
           const res = await fetch(target, { redirect: 'follow' });
           const result = await res.json();
           if (result?.success) {
-            setItems(prev => {
-              const newData = prev.filter(i => i.id !== confirmDelete.id);
-              localStorage.setItem('infoWallCache', JSON.stringify(newData));
-              return newData;
-            });
+            setItems(prev => prev.filter(i => i.id !== confirmDelete.id));
             showMessage("刪除成功");
           } else { showMessage("刪除失敗"); }
         } catch (e) { showMessage("網路連線錯誤"); }
@@ -194,11 +182,7 @@
           const res = await fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify(payload) });
           const result = await res.json();
           if (result?.success) {
-            setItems(prev => {
-              const newData = prev.map(i => i.id === editingItem.id ? editingItem : i);
-              localStorage.setItem('infoWallCache', JSON.stringify(newData));
-              return newData;
-            });
+            setItems(prev => prev.map(i => i.id === editingItem.id ? editingItem : i));
             showMessage("更新成功");
           } else { showMessage("更新失敗"); }
         } catch (e) { showMessage("網路錯誤"); }
@@ -210,7 +194,7 @@
         const lines = currentContent.split('\n');
         lines[lineIndex] = lines[lineIndex].includes('- [ ]') ? lines[lineIndex].replace('- [ ]', '- [x]') : lines[lineIndex].replace('- [x]', '- [ ]');
         const newContent = lines.join('\n');
-        setItems(prev => { const newData = prev.map(item => item.id === id ? { ...item, content: newContent } : item); localStorage.setItem('infoWallCache', JSON.stringify(newData)); return newData; });
+        setItems(prev => prev.map(item => item.id === id ? { ...item, content: newContent } : item));
         fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify({ action: 'updateFull', id, content: encodeURIComponent(newContent) }) });
       };
 
@@ -227,11 +211,7 @@
           if (item.type === 'todo' && newContent) newContent = newContent.replace(/- \[ \]/g, '- [x]');
         }
         
-        setItems(prev => {
-          const newData = prev.map(i => i.id === item.id ? { ...i, title: newTitle, content: item.type === 'todo' ? newContent : i.content } : i);
-          localStorage.setItem('infoWallCache', JSON.stringify(newData));
-          return newData;
-        });
+        setItems(prev => prev.map(i => i.id === item.id ? { ...i, title: newTitle, content: item.type === 'todo' ? newContent : i.content } : i));
         
         try {
           const payload = { action: 'updateFull', id: item.id, title: encodeURIComponent(newTitle), type: item.type };
