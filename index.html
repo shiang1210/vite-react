@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📋</text></svg>">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>智能資訊牆 V12.6</title>
+  <title>智能資訊牆 V13.0</title>
   
   <style>
     body { margin: 0; padding: 0; min-height: 100vh; overflow-x: hidden; }
@@ -32,14 +32,42 @@
 
   <script>
     window.runSystemDiagnostics = function() {
+      indexedDB.deleteDatabase('InfoWallDB');
       localStorage.clear();
-      alert("本機資料已清除，系統即將重啟。");
+      alert("本機資料與快取已清除，系統即將重啟。");
       window.location.reload(true);
     };
   </script>
 
   <script type="text/babel">
     const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+    const initDB = () => new Promise((resolve, reject) => {
+      const req = indexedDB.open('InfoWallDB', 1);
+      req.onupgradeneeded = e => e.target.result.createObjectStore('cacheStore');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+
+    const saveToIDB = async (key, data) => {
+      try {
+        const db = await initDB();
+        const tx = db.transaction('cacheStore', 'readwrite');
+        tx.objectStore('cacheStore').put(data, key);
+      } catch(e) {}
+    };
+
+    const getFromIDB = async (key) => {
+      try {
+        const db = await initDB();
+        return new Promise(resolve => {
+          const tx = db.transaction('cacheStore', 'readonly');
+          const req = tx.objectStore('cacheStore').get(key);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve(null);
+        });
+      } catch(e) { return null; }
+    };
 
     const LazyImage = ({ src, alt, className }) => {
       const [isLoaded, setIsLoaded] = useState(false);
@@ -89,8 +117,9 @@
       
       const [isAskAiOpen, setIsAskAiOpen] = useState(false);
       const [askAiQuery, setAskAiQuery] = useState('');
-      const [askAiResponse, setAskAiResponse] = useState('');
+      const [chatHistory, setChatHistory] = useState([]);
       const [isAskAiLoading, setIsAskAiLoading] = useState(false);
+      const chatScrollRef = useRef(null);
 
       const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
       const [tagMergeSources, setTagMergeSources] = useState([]);
@@ -137,7 +166,7 @@
           
           if (Array.isArray(data)) {
             setItems(data); 
-            localStorage.setItem('infoWallCache', JSON.stringify(data));
+            await saveToIDB('infoWallCache', data);
           } else throw new Error("API 資料格式異常");
         } catch (e) { setIsError(true); showMessage(e.message || "網路讀取失敗"); } 
         finally { setIsLoading(false); const loader = document.getElementById('initial-loader'); if(loader) loader.style.display = 'none'; }
@@ -145,8 +174,8 @@
 
       useEffect(() => {
         const init = async () => {
-          const cached = localStorage.getItem('infoWallCache');
-          if (cached) { try { const parsed = JSON.parse(cached); if (Array.isArray(parsed)) { setItems(parsed); setIsLoading(false); const loader = document.getElementById('initial-loader'); if(loader) loader.style.display = 'none'; } } catch (e) {} }
+          const cached = await getFromIDB('infoWallCache');
+          if (cached && Array.isArray(cached)) { setItems(cached); setIsLoading(false); const loader = document.getElementById('initial-loader'); if(loader) loader.style.display = 'none'; }
           if (window.liff) { try { await window.liff.init({ liffId: LIFF_ID }); if (window.liff.isLoggedIn()) setProfile(await window.liff.getProfile()); } catch (e) {} }
           fetchData();
         };
@@ -305,17 +334,40 @@
       const generateCalendarUrl = (title, details) => { const url = new URL('https://calendar.google.com/calendar/render'); url.searchParams.append('action', 'TEMPLATE'); url.searchParams.append('text', title || ''); url.searchParams.append('details', details || ''); return url.toString(); };
       const getTags = (subcatStr) => { if (!subcatStr) return []; return subcatStr.split(/[,、]/).map(s => s.trim()).filter(Boolean); };
 
+      useEffect(() => {
+        if (chatScrollRef.current) {
+          chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+        }
+      }, [chatHistory, isAskAiLoading]);
+
       const handleAskAI = async () => {
         if (!askAiQuery.trim()) return;
-        setIsAskAiLoading(true); setAskAiResponse('');
+        const currentQuery = askAiQuery;
+        setAskAiQuery('');
+        setIsAskAiLoading(true);
+        
+        const newHistory = [...chatHistory, { role: 'user', content: currentQuery }];
+        setChatHistory(newHistory);
+
         try {
-          const contextData = filteredAndSorted.map(i => `[${i.type}] ${i.title}: ${i.content}`).join('\n\n').substring(0, 10000);
-          const res = await fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify({ action: 'askAI', question: askAiQuery, context: contextData }) });
+          const contextData = filteredAndSorted.map(i => `[${i.type}] ${i.title}: ${i.content}`).join('\n\n').substring(0, 8000);
+          const historyText = newHistory.map(m => `${m.role === 'user' ? '用戶' : 'AI'}: ${m.content}`).join('\n');
+          const payload = { action: 'askAI', question: currentQuery, context: contextData, history: historyText };
+          
+          const res = await fetch(GAS_URL, { redirect: 'follow', method: 'POST', body: JSON.stringify(payload) });
           const result = await res.json();
-          if (result.success) setAskAiResponse(result.answer); else setAskAiResponse("發生錯誤，請稍後再試。");
-        } catch (e) { setAskAiResponse("網路連線異常，無法聯繫知識庫。"); }
+          if (result.success) {
+             setChatHistory(prev => [...prev, { role: 'ai', content: result.answer }]);
+          } else {
+             setChatHistory(prev => [...prev, { role: 'ai', content: "發生錯誤，請稍後再試。" }]);
+          }
+        } catch (e) { 
+           setChatHistory(prev => [...prev, { role: 'ai', content: "網路連線異常，無法聯繫知識庫。" }]);
+        }
         setIsAskAiLoading(false);
       };
+
+      const clearChatHistory = () => { setChatHistory([]); };
 
       const filterMap = { '全部': 'all', '待辦': 'todo', '行程': 'event', '好文': 'article', '檔案': 'file' };
       const subcategories = useMemo(() => { 
@@ -330,6 +382,7 @@
         const todayStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
         let baseFiltered = items.filter(i => { 
+          if (filter === '看板') return true; 
           const typeMatch = filter === '全部' ? true : i.type === filterMap[filter]; 
           const tags = getTags(i.subcategory);
           const subMatch = (filter === '好文' && subFilter !== '全部') ? (tags.includes(subFilter) || (tags.length === 0 && subFilter === '未分類')) : true; 
@@ -375,13 +428,96 @@
         return { total, completed, percent: total === 0 ? 0 : Math.round((completed / total) * 100) };
       }, [filteredAndSorted]);
 
+      const renderCard = (item) => {
+        const thumb = getThumbnail(item?.url);
+        const isSelected = selectedIds.has(item?.id);
+        const isCompleted = item?.title?.includes('[已完成]');
+        const isGCal = String(item?.id).startsWith('gcal-');
+        
+        return (
+          <div key={item?.id} onClick={() => isManageMode && toggleSelection(item.id)} className={`virtual-card group rounded-2xl border shadow-sm transition-all overflow-hidden flex flex-col relative ${isManageMode ? 'cursor-pointer' : ''} ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} ${isSelected ? 'ring-2 ring-indigo-500' : ''} ${isCompleted ? 'opacity-50 grayscale-[50%]' : ''}`}>
+            
+            {!isManageMode && !isGCal && (
+              <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingItem({...item}); }} className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs shadow active:scale-95 cursor-pointer">✏️</button>
+                <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmDelete({id: item.id, url: item.url}); }} className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow active:scale-95 cursor-pointer">✕</button>
+              </div>
+            )}
+            
+            {item?.type === 'file' && thumb && (
+              <div onClick={(e) => { if (!isManageMode) handleOpenUrl(e, item.url); }} className="w-full h-32 overflow-hidden cursor-pointer">
+                <LazyImage src={thumb} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+              </div>
+            )}
+
+            <div className="p-4">
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <div className={`px-2 py-1 rounded text-[10px] font-black uppercase ${item?.color || 'bg-slate-100 text-slate-600'} ${isDarkMode && item?.color?.includes('slate') ? 'bg-slate-700 text-slate-300' : ''}`}>
+                  {item?.icon} {item?.type?.toUpperCase()}
+                </div>
+                {item?.type === 'article' && getTags(item.subcategory).map(tag => (
+                   <span key={tag} className="px-2 py-1 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400">
+                     {tag}
+                   </span>
+                ))}
+                <span className="text-[10px] font-bold text-slate-400 ml-auto whitespace-nowrap">{item?.date} {item?.time}</span>
+              </div>
+              
+              <h2 onClick={(e) => { if (!isManageMode && item?.type !== 'todo' && item?.url) handleOpenUrl(e, item.url); }} className={`text-base font-black leading-tight mb-2 ${isDarkMode ? 'text-slate-100' : 'text-slate-800'} ${item?.type !== 'todo' && !isManageMode ? 'cursor-pointer hover:text-indigo-500' : ''}`}>
+                {item?.title ?? '無標題'}
+              </h2>
+              
+              {item?.type === 'todo' ? (
+                <div className="space-y-2 mt-3">
+                  {(item?.content || '').split('\n').map((line, idx) => {
+                    const isChecked = line.includes('- [x]');
+                    const isTodo = line.includes('- [ ]') || isChecked;
+                    if (!isTodo) return <p key={idx} className="text-xs text-slate-500">{line}</p>;
+                    return (
+                      <div key={idx} className="flex items-start gap-2 cursor-pointer group/todo" onClick={(e) => { if (!isManageMode) handleToggleTodo(item.id, item.content, idx); e.stopPropagation(); }}>
+                        <div className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${isChecked ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-slate-400 group-hover/todo:border-indigo-400'}`}>
+                          {isChecked && <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                        </div>
+                        <span className={`text-sm font-medium ${isChecked ? 'text-slate-500 line-through' : ''}`}>{line.replace(/- \[(x| )\] /, '')}</span>
+                      </div>
+                    );
+                  })}
+                  {!isManageMode && !isGCal && (
+                    <div className="mt-4 flex flex-col gap-2">
+                      <button onClick={(e) => handleToggleCompleted(item, e)} className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isCompleted ? (isDarkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-600') : (isDarkMode ? 'bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600')}`}>
+                        {isCompleted ? '↺ 取消完成' : '✅ 標示為完成'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : ( <div className="rounded-xl p-3 text-xs font-medium leading-relaxed max-h-[120px] overflow-y-auto whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item?.content ?? '') }} /> )}
+
+              {item?.type === 'event' && (
+                <div className="mt-4 flex flex-col gap-2">
+                  {!isGCal && (
+                    <a href={item?.url && item.url !== '#' ? item.url : generateCalendarUrl(item?.title, item?.content)} target="_blank" rel="noreferrer" className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isDarkMode ? 'bg-blue-900/50 hover:bg-blue-800/50 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'}`}>
+                      📅 加入 Google 行事曆
+                    </a>
+                  )}
+                  {!isManageMode && (
+                    <button onClick={(e) => handleToggleCompleted(item, e)} className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isCompleted ? (isDarkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-600') : (isDarkMode ? 'bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600')}`}>
+                      {isCompleted ? '↺ 取消完成' : '✅ 標示為完成'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      };
+
       return (
         <div className={`w-full max-w-7xl mx-auto px-4 py-2 h-full flex flex-col font-sans transition-colors duration-300 ${isDarkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
           <header className={`sticky top-0 z-40 border-b backdrop-blur-xl transition-colors duration-300 ${isDarkMode ? 'bg-slate-900/80 border-slate-700/50' : 'bg-white/80 border-slate-200/50'}`}>
             <div className="py-3 flex justify-between items-center flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">📋</div>
-                <h1 className="text-lg font-black tracking-tighter hidden sm:block">資訊牆 V12.6</h1>
+                <h1 className="text-lg font-black tracking-tighter hidden sm:block">資訊牆 V13.0</h1>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 {pwaPrompt && <button onClick={installPWA} className="px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs font-black transition-colors hover:bg-blue-600">📥 安裝桌面版</button>}
@@ -393,7 +529,7 @@
               </div>
             </div>
             
-            {(filter === '全部' || filter === '待辦') && todoStats.total > 0 && (
+            {filter !== '看板' && (filter === '全部' || filter === '待辦') && todoStats.total > 0 && (
               <div className="pb-3 px-1">
                 <div className="flex justify-between text-xs font-bold mb-1"><span className="text-slate-400">任務達成率</span><span className="text-indigo-500">{todoStats.percent}% ({todoStats.completed}/{todoStats.total})</span></div>
                 <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${todoStats.percent}%` }}></div></div>
@@ -402,7 +538,7 @@
 
             <div className="pb-3 flex flex-col sm:flex-row gap-3 sm:items-start justify-between">
               <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1">
-                {['全部', '待辦', '行程', '好文', '檔案'].map(t => (
+                {['全部', '看板', '待辦', '行程', '好文', '檔案'].map(t => (
                   <button key={t} onClick={() => { setFilter(t); setSubFilter('全部'); }} className={`px-4 py-1.5 rounded-xl text-[11px] font-black whitespace-nowrap transition-all ${filter === t ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'bg-slate-800 text-slate-400' : 'bg-white text-slate-400 border border-slate-200/60')}`}>{t}</button>
                 ))}
               </div>
@@ -449,92 +585,34 @@
           </header>
 
           <main className="py-6 flex-1 pb-24">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
-              {currentItems.map(item => {
-                const thumb = getThumbnail(item?.url);
-                const isSelected = selectedIds.has(item?.id);
-                const isCompleted = item?.title?.includes('[已完成]');
-                const isGCal = String(item?.id).startsWith('gcal-');
-                
-                return (
-                  <div key={item?.id} onClick={() => isManageMode && toggleSelection(item.id)} className={`virtual-card group rounded-2xl border shadow-sm transition-all overflow-hidden flex flex-col relative ${isManageMode ? 'cursor-pointer' : ''} ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} ${isSelected ? 'ring-2 ring-indigo-500' : ''} ${isCompleted ? 'opacity-50 grayscale-[50%]' : ''}`}>
-                    
-                    {!isManageMode && !isGCal && (
-                      <div className="absolute top-2 right-2 z-20 flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingItem({...item}); }} className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs shadow active:scale-95 cursor-pointer">✏️</button>
-                        <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmDelete({id: item.id, url: item.url}); }} className="w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow active:scale-95 cursor-pointer">✕</button>
-                      </div>
-                    )}
-                    
-                    {item?.type === 'file' && thumb && (
-                      <div onClick={(e) => { if (!isManageMode) handleOpenUrl(e, item.url); }} className="w-full h-32 overflow-hidden cursor-pointer">
-                        <LazyImage src={thumb} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                      </div>
-                    )}
-
-                    <div className="p-4">
-                      <div className="flex items-center gap-2 mb-3 flex-wrap">
-                        <div className={`px-2 py-1 rounded text-[10px] font-black uppercase ${item?.color || 'bg-slate-100 text-slate-600'} ${isDarkMode && item?.color?.includes('slate') ? 'bg-slate-700 text-slate-300' : ''}`}>
-                          {item?.icon} {item?.type?.toUpperCase()}
-                        </div>
-                        {item?.type === 'article' && getTags(item.subcategory).map(tag => (
-                           <span key={tag} className="px-2 py-1 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400">
-                             {tag}
-                           </span>
-                        ))}
-                        <span className="text-[10px] font-bold text-slate-400 ml-auto whitespace-nowrap">{item?.date} {item?.time}</span>
-                      </div>
-                      
-                      <h2 onClick={(e) => { if (!isManageMode && item?.type !== 'todo' && item?.url) handleOpenUrl(e, item.url); }} className={`text-base font-black leading-tight mb-2 ${isDarkMode ? 'text-slate-100' : 'text-slate-800'} ${item?.type !== 'todo' && !isManageMode ? 'cursor-pointer hover:text-indigo-500' : ''}`}>
-                        {item?.title ?? '無標題'}
-                      </h2>
-                      
-                      {item?.type === 'todo' ? (
-                        <div className="space-y-2 mt-3">
-                          {(item?.content || '').split('\n').map((line, idx) => {
-                            const isChecked = line.includes('- [x]');
-                            const isTodo = line.includes('- [ ]') || isChecked;
-                            if (!isTodo) return <p key={idx} className="text-xs text-slate-500">{line}</p>;
-                            return (
-                              <div key={idx} className="flex items-start gap-2 cursor-pointer group/todo" onClick={(e) => { if (!isManageMode) handleToggleTodo(item.id, item.content, idx); e.stopPropagation(); }}>
-                                <div className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${isChecked ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-slate-400 group-hover/todo:border-indigo-400'}`}>
-                                  {isChecked && <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                                </div>
-                                <span className={`text-sm font-medium ${isChecked ? 'text-slate-500 line-through' : ''}`}>{line.replace(/- \[(x| )\] /, '')}</span>
-                              </div>
-                            );
-                          })}
-                          {!isManageMode && !isGCal && (
-                            <div className="mt-4 flex flex-col gap-2">
-                              <button onClick={(e) => handleToggleCompleted(item, e)} className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isCompleted ? (isDarkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-600') : (isDarkMode ? 'bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600')}`}>
-                                {isCompleted ? '↺ 取消完成' : '✅ 標示為完成'}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ) : ( <div className="rounded-xl p-3 text-xs font-medium leading-relaxed max-h-[120px] overflow-y-auto whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item?.content ?? '') }} /> )}
-
-                      {item?.type === 'event' && (
-                        <div className="mt-4 flex flex-col gap-2">
-                          {!isGCal && (
-                            <a href={item?.url && item.url !== '#' ? item.url : generateCalendarUrl(item?.title, item?.content)} target="_blank" rel="noreferrer" className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isDarkMode ? 'bg-blue-900/50 hover:bg-blue-800/50 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'}`}>
-                              📅 加入 Google 行事曆
-                            </a>
-                          )}
-                          {!isManageMode && (
-                            <button onClick={(e) => handleToggleCompleted(item, e)} className={`flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-black transition-colors ${isCompleted ? (isDarkMode ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-200 hover:bg-slate-300 text-slate-600') : (isDarkMode ? 'bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-400' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600')}`}>
-                              {isCompleted ? '↺ 取消完成' : '✅ 標示為完成'}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            {filter === '看板' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start w-full">
+                <div className={`rounded-2xl p-4 min-h-[500px] border ${isDarkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                   <h2 className="font-black text-lg mb-4 text-amber-500 flex justify-between items-center">
+                     <span>🚀 待處理任務</span>
+                     <span className="text-sm bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400 px-2 py-0.5 rounded-lg">{filteredAndSorted.filter(i => i.type === 'todo' && !i.title.includes('[已完成]')).length}</span>
+                   </h2>
+                   <div className="flex flex-col gap-4">
+                      {filteredAndSorted.filter(i => i.type === 'todo' && !i.title.includes('[已完成]')).map(renderCard)}
+                   </div>
+                </div>
+                <div className={`rounded-2xl p-4 min-h-[500px] border ${isDarkMode ? 'bg-emerald-900/10 border-emerald-900/30' : 'bg-emerald-50 border-emerald-100'}`}>
+                   <h2 className="font-black text-lg mb-4 text-emerald-600 flex justify-between items-center">
+                     <span>✅ 已完成任務</span>
+                     <span className="text-sm bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-400 px-2 py-0.5 rounded-lg">{filteredAndSorted.filter(i => i.type === 'todo' && i.title.includes('[已完成]')).length}</span>
+                   </h2>
+                   <div className="flex flex-col gap-4">
+                      {filteredAndSorted.filter(i => i.type === 'todo' && i.title.includes('[已完成]')).map(renderCard)}
+                   </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+                {currentItems.map(renderCard)}
+              </div>
+            )}
             
-            {!isLoading && totalPages > 1 && (
+            {!isLoading && filter !== '看板' && totalPages > 1 && (
               <div className="flex justify-center items-center gap-4 mt-8 pb-8">
                 <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-indigo-500 hover:text-white'} ${isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-white text-slate-600 shadow-sm border border-slate-200'}`}>上一頁</button>
                 <span className={`text-sm font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>第 {currentPage} / {totalPages} 頁</span>
@@ -600,18 +678,27 @@
           <button onClick={() => setIsAskAiOpen(!isAskAiOpen)} className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 rounded-full shadow-2xl flex items-center justify-center text-white text-2xl hover:scale-110 transition-transform">✨</button>
           
           {isAskAiOpen && (
-            <div className={`fixed bottom-24 right-6 z-[9999] w-[calc(100%-3rem)] sm:w-96 rounded-3xl shadow-2xl border flex flex-col overflow-hidden transition-colors ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              <div className="p-4 bg-indigo-600 text-white font-black flex justify-between items-center">
-                <span>知識庫專屬助理</span>
+            <div className={`fixed bottom-24 right-6 z-[9999] w-[calc(100%-3rem)] sm:w-96 h-[500px] max-h-[70vh] rounded-3xl shadow-2xl border flex flex-col overflow-hidden transition-colors ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className="p-4 bg-indigo-600 text-white font-black flex justify-between items-center shadow-md z-10">
+                <div className="flex items-center gap-2">
+                  <span>知識庫專屬助理</span>
+                  <button onClick={clearChatHistory} className="ml-2 text-[10px] bg-white/20 hover:bg-white/40 px-2 py-1 rounded transition-colors">清除記憶</button>
+                </div>
                 <button onClick={() => setIsAskAiOpen(false)} className="opacity-70 hover:opacity-100 text-lg">✕</button>
               </div>
-              <div className="p-4 flex-1 h-64 overflow-y-auto flex flex-col gap-3 text-sm">
-                <div className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-200 p-3 rounded-2xl rounded-tl-none self-start max-w-[90%]">您好！您可以針對目前畫面上過濾出的資料問我任何問題。</div>
-                {askAiResponse && <div className="bg-slate-100 dark:bg-slate-700 p-3 rounded-2xl rounded-tl-none self-start max-w-[90%] whitespace-pre-wrap leading-relaxed">{askAiResponse}</div>}
+              <div className={`flex-1 overflow-y-auto p-4 flex flex-col gap-3 text-sm ${isDarkMode ? 'bg-slate-900' : 'bg-slate-50'}`} ref={chatScrollRef}>
+                <div className={`p-3 rounded-2xl rounded-tl-none self-start max-w-[90%] ${isDarkMode ? 'bg-indigo-900/30 text-indigo-200' : 'bg-indigo-100 text-indigo-800'}`}>
+                  您好！我已具備記憶功能。您可以針對目前過濾出的資料與我進行連續對話探討。
+                </div>
+                {chatHistory.map((msg, idx) => (
+                  <div key={idx} className={`p-3 rounded-2xl max-w-[90%] whitespace-pre-wrap leading-relaxed ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none self-end' : (isDarkMode ? 'bg-slate-800 border border-slate-700 text-slate-200 rounded-tl-none self-start' : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none self-start')}`}>
+                    {msg.content}
+                  </div>
+                ))}
                 {isAskAiLoading && <div className="text-indigo-500 font-bold animate-pulse text-xs ml-2">分析大腦知識庫中...</div>}
               </div>
-              <div className="p-3 border-t dark:border-slate-700 flex gap-2">
-                <input type="text" value={askAiQuery} onChange={(e) => setAskAiQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAskAI()} placeholder="詢問當前分類的資料..." className={`flex-1 px-3 py-2 rounded-xl text-sm outline-none border ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
+              <div className={`p-3 border-t flex gap-2 z-10 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                <input type="text" value={askAiQuery} onChange={(e) => setAskAiQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAskAI()} placeholder="詢問當前分類的資料..." className={`flex-1 px-3 py-2 rounded-xl text-sm outline-none border focus:border-indigo-500 transition-colors ${isDarkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-slate-50 border-slate-200'}`} />
                 <button onClick={handleAskAI} disabled={isAskAiLoading || !askAiQuery.trim()} className="bg-indigo-600 text-white px-4 rounded-xl text-sm font-bold disabled:opacity-50 hover:bg-indigo-700 transition-colors">送出</button>
               </div>
             </div>
